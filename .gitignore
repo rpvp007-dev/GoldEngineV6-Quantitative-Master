@@ -1,0 +1,5 @@
+# MT5 Compiled Artifacts & Log Files
+*.log
+*.csv
+*.tmp
+*.bak
