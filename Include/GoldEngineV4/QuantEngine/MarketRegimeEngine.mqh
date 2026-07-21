@@ -15,7 +15,7 @@ enum ENUM_MARKET_REGIME_STATE
 {
    REGIME_STATE_TRENDING = 0, // Strong Trend: Target 4.0x ATR (+80 to +120 pips), Profit Lock OFF
    REGIME_STATE_RANGING  = 1, // Range Bound: Target 1.2x ATR (+10 to +15 pips), Quick Exit
-   REGIME_STATE_CHOP_DEAD = 2  // Flat Chop: HALT ALL TRADING 100%
+   REGIME_STATE_CHOP_DEAD = 2  // Flat Chop / Asian Off-Hours: HALT ALL TRADING 100%
 };
 
 class CMarketRegimeEngine
@@ -42,6 +42,14 @@ public:
 
    ENUM_MARKET_REGIME_STATE GetRegimeState()
    {
+      // RULE 1: ASIAN OFF-PEAK SESSION FILTER (00:00 to 06:30 MT5 Time) -> HALT ALL TRADING 100%
+      MqlDateTime dt;
+      TimeCurrent(dt);
+      if(dt.hour >= 0 && dt.hour < 7)
+      {
+         return REGIME_STATE_CHOP_DEAD; // Asian off-hours -> 100% BLOCKED
+      }
+
       double adxVal[1];
       double atrVal[1];
 
@@ -52,21 +60,25 @@ public:
       }
 
       double adx = adxVal[0];
-      double atr = atrVal[0] / _Point; // In points
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      if(point <= 0.0) point = 0.01;
 
-      // Rule 1: CHOP DEAD State (ATR < 60 points / 6 pips or ADX < 14) -> HALT ALL TRADING
-      if(atr < 60.0 || adx < 14.0)
+      // Calculate ATR in Pips (1 Pip = 10 * _Point)
+      double atrPips = atrVal[0] / (point * 10.0);
+
+      // RULE 2: CHOP DEAD State (ATR < 35.0 pips / $3.50 or ADX < 20.0) -> HALT ALL TRADING
+      if(atrPips < 35.0 || adx < 20.0)
       {
          return REGIME_STATE_CHOP_DEAD;
       }
 
-      // Rule 2: TRENDING State (ADX > 25 and ATR > 100 points / 10 pips) -> LONG TARGETS (+80 PIPS)
-      if(adx >= 25.0 && atr >= 100.0)
+      // RULE 3: TRENDING State (ADX >= 25.0 and ATR >= 50.0 pips / $5.00) -> LONG TARGETS (+80 PIPS)
+      if(adx >= 25.0 && atrPips >= 50.0)
       {
          return REGIME_STATE_TRENDING;
       }
 
-      // Rule 3: RANGING State (ADX between 14 and 25) -> SHORT TARGETS (+12 PIPS)
+      // RULE 4: RANGING State -> SHORT TARGETS (+12 PIPS)
       return REGIME_STATE_RANGING;
    }
 
