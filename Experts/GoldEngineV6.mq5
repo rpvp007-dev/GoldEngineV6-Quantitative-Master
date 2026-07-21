@@ -281,6 +281,10 @@ private:
    // Explainability Framework
    CExplainabilityFramework*  m_explainability;
 
+   // V6 Master Engines
+   CMarketRegimeEngine*       m_regimeEngine;
+   CDynamicTargetEngine*      m_dynamicTargetEngine;
+
    // 5 Analytics components
    CTradeStatistics*          m_tradeStatistics;
    CPerformanceTracker*       m_performanceTracker;
@@ -647,6 +651,8 @@ public:
 
       if(CheckPointer(m_explainability) == POINTER_DYNAMIC) delete m_explainability;
       if(CheckPointer(m_executionEngine) == POINTER_DYNAMIC) delete m_executionEngine;
+      if(CheckPointer(m_dynamicTargetEngine) == POINTER_DYNAMIC) delete m_dynamicTargetEngine;
+      if(CheckPointer(m_regimeEngine) == POINTER_DYNAMIC) delete m_regimeEngine;
       if(CheckPointer(m_riskGuardian) == POINTER_DYNAMIC) delete m_riskGuardian;
       if(CheckPointer(m_tradeOptEngine) == POINTER_DYNAMIC) delete m_tradeOptEngine;
       if(CheckPointer(m_pullbackEngine) == POINTER_DYNAMIC) delete m_pullbackEngine;
@@ -836,6 +842,10 @@ public:
       // 3. Create Strategy Manager and Portfolio Manager
       m_strategyManager = new CStrategyManager(m_logger);
       m_portfolioManager = new CPortfolioManager(m_logger, m_config);
+
+      // Create V6 Master Engines
+      m_regimeEngine = new CMarketRegimeEngine(m_logger, m_config);
+      m_dynamicTargetEngine = new CDynamicTargetEngine(m_logger, m_config, m_regimeEngine);
 
       // Register Bespoke Gold Strategies (GoldEngine V5)
       CG001_AsianRangeSweep* g001 = new CG001_AsianRangeSweep(m_logger, m_config);
@@ -1296,6 +1306,25 @@ public:
          string structState = m_structureEngine.GetStructureState();
          int regimeVal = (m_marketContextEngine != NULL) ? m_marketContextEngine.GetContext().MarketRegime : 0;
          double pointVal = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+
+         // V6 MASTER GATEKEEPER: Check Market Regime State
+         ENUM_MARKET_REGIME_STATE regimeState = m_regimeEngine.GetRegimeState();
+         if(regimeState == REGIME_STATE_CHOP_DEAD)
+         {
+            riskAllowed = false;
+            riskResponse.Reason = "V6 GATEKEEPER BLOCK: Market in STATE_CHOP_DEAD (ATR < 6.0 pips / ADX < 14.0)";
+         }
+         else
+         {
+            // V6 MASTER TARGET ENGINE: Calculate Dynamic Regime-Based TP/SL
+            double atrPoints = m_volatilityEngine.GetATR(_Symbol, PERIOD_M15, 14, 1) / _Point;
+            double outSL = 0.0, outTP = 0.0, outBE = 0.0;
+            if(m_dynamicTargetEngine.CalculateDynamicTargets(rawResponses[i].Signal, rawResponses[i].EntryPrice, atrPoints, outSL, outTP, outBE))
+            {
+               rawResponses[i].StopLoss = outSL;
+               rawResponses[i].TakeProfit = outTP;
+            }
+         }
 
          bool isApproved = false;
          if(!riskAllowed)
