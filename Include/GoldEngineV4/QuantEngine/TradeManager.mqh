@@ -634,9 +634,9 @@ double CTradeManager::GetATR(const string symbol) const
       // +0.50 ATR -> move stop to break-even (BE)
       // +1.00 ATR -> lock small profit (0.2 ATR)
       // +2.00 ATR -> tighten trailing stop
-      double beTrigger = m_config.GetBreakEvenTrigger(); // Connected to screen input (Points)
-      double lockTrigger = atrPoints * 0.8; // Tightened from 1.0 to lock profit early
-      double trailTrigger = atrPoints * 1.5; // Tightened from 2.0 to trail profit early
+      double beTrigger = m_config.GetBreakEvenTrigger(); // Connected to dynamic V6 targets (Points)
+      double lockTrigger = beTrigger * 1.5; // Scale-out only at 1.5x BE Trigger (prevent early choking)
+      double trailTrigger = atrPoints * 2.0;
 
       // V5.5 Sudden News Spike Protection:
       // If we are in profit and the volatility regime turns to VOL_STATE_EXPLODING,
@@ -644,7 +644,7 @@ double CTradeManager::GetATR(const string symbol) const
       // to secure gains before a sudden news reversal occurs.
       if(m_engines.MarketContext != NULL && m_engines.MarketContext.GetContext().VolatilityRegime == VOL_STATE_EXPLODING)
       {
-         trailTrigger = atrPoints * 0.5; // Trigger trailing immediately
+         trailTrigger = atrPoints * 0.8; // Trigger trailing immediately
          atrPoints = atrPoints * 0.8;    // Tighten the trail distance by 20%
       }
 
@@ -656,12 +656,12 @@ double CTradeManager::GetATR(const string symbol) const
          double targetOffsetPoints = 0.0;
          double triggerPoints = 0.0;
 
-         // Evaluate Stage 1 (Break-Even) - Trigger at +250 points (+25 pips)
-         if(profitPoints >= 250.0 && currentStage < 2)
+         // Evaluate Stage 1 (Break-Even) - Dynamic Trigger
+         if(profitPoints >= beTrigger && currentStage < 2)
          {
             nextStage = 2;
-            triggerPoints = 250.0;
-            targetOffsetPoints = 50.0; // Lock +5 pips
+            triggerPoints = beTrigger;
+            targetOffsetPoints = m_config.GetBreakEvenOffset(); // Lock dynamic BE offset
          }
 
          if(nextStage > currentStage)
@@ -706,15 +706,16 @@ double CTradeManager::GetATR(const string symbol) const
                   double tickSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
                   if(tickSize <= 0.0) tickSize = point;
                   
-                  double beSL = (type == POSITION_TYPE_BUY) ? (entryPrice + 5.0 * point) : (entryPrice - 5.0 * point);
+                  double scaleOutOffset = m_config.GetBreakEvenOffset();
+                  double beSL = (type == POSITION_TYPE_BUY) ? (entryPrice + scaleOutOffset * point) : (entryPrice - scaleOutOffset * point);
                   beSL = NormalizeDouble(MathRound(beSL / tickSize) * tickSize, _Digits);
                   
                   nextSL = beSL;
                   m_trackedTrades[i].BreakEvenActive = true;
-                  m_trackedTrades[i].LockedProfitPoints = 5.0;
+                  m_trackedTrades[i].LockedProfitPoints = scaleOutOffset;
                   modified = true;
                   
-                  m_logger.Info(StringFormat("[SCALE-OUT] Moved remaining SL of Ticket %d to Entry+0.5 pips (%.2f).", ticket, beSL));
+                  m_logger.Info(StringFormat("[SCALE-OUT] Moved remaining SL of Ticket %d to Entry+%.1f pips (%.2f).", ticket, scaleOutOffset / 10.0, beSL));
                }
             }
          }
