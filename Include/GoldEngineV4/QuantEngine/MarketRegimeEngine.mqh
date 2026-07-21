@@ -59,7 +59,6 @@ public:
       double atrPips = atrVal[0] / (point * 10.0);
 
       // RULE 1: CHOP DEAD State (ATR < 30.0 pips / $3.00) -> HALT ALL TRADING
-      // We do NOT block by ADX < 20 because new trends start at low ADX!
       if(atrPips < 30.0)
       {
          return REGIME_STATE_CHOP_DEAD;
@@ -101,6 +100,19 @@ public:
       
       double range = dayHigh - dayLow;
       if(range <= 0.0) return false;
+      
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      if(point <= 0.0) point = 0.01;
+      
+      // Calculate daily range so far in Pips
+      double rangePips = range / (point * 10.0);
+      
+      // NEW PROTECTION: If daily range so far is less than 30.0 Pips ($3.00),
+      // we do NOT block entries because the morning session range is still expanding!
+      if(rangePips < 30.0)
+      {
+         return false; 
+      }
       
       // Define 25% and 75% boundaries of the daily range
       double lowThreshold = dayLow + range * 0.25;
