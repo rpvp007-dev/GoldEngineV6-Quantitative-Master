@@ -1307,12 +1307,17 @@ public:
          int regimeVal = (m_marketContextEngine != NULL) ? m_marketContextEngine.GetContext().MarketRegime : 0;
          double pointVal = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
 
-         // V6 MASTER GATEKEEPER: Check Market Regime State
+         // V6 MASTER GATEKEEPER: Check Market Regime State & Consolidation Boundaries
          ENUM_MARKET_REGIME_STATE regimeState = m_regimeEngine.GetRegimeState();
          if(regimeState == REGIME_STATE_CHOP_DEAD)
          {
             riskAllowed = false;
-            riskResponse.Reason = "V6 GATEKEEPER BLOCK: Market in STATE_CHOP_DEAD (ATR < 6.0 pips / ADX < 14.0)";
+            riskResponse.Reason = "V6 GATEKEEPER BLOCK: Market in STATE_CHOP_DEAD (ATR < 35.0 pips / ADX < 20.0)";
+         }
+         else if(m_regimeEngine.IsPriceInNoMansLand(rawResponses[i].EntryPrice))
+         {
+            riskAllowed = false;
+            riskResponse.Reason = "V6 ENTRY BLOCK: Price inside Daily Range Middle Zone (No-Man's Land)";
          }
          else
          {

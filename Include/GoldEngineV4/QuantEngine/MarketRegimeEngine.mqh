@@ -82,6 +82,46 @@ public:
       return REGIME_STATE_RANGING;
    }
 
+   /**
+    * @brief Pillar 1: Check if the price is in "No-Man's Land" (middle 50% zone of day's range)
+    */
+   bool IsPriceInNoMansLand(double currentPrice)
+   {
+      MqlDateTime dt;
+      TimeCurrent(dt);
+      
+      // Calculate bars since 00:00 today (M15 timeframe)
+      int barsToday = dt.hour * 4 + dt.min / 15;
+      if(barsToday <= 0) return false;
+      
+      MqlRates rates[];
+      if(CopyRates(_Symbol, PERIOD_M15, 0, barsToday, rates) <= 0) return false;
+      
+      double dayHigh = -999999.0;
+      double dayLow = 999999.0;
+      
+      for(int i = 0; i < ArraySize(rates); i++)
+      {
+         if(rates[i].high > dayHigh) dayHigh = rates[i].high;
+         if(rates[i].low < dayLow)   dayLow = rates[i].low;
+      }
+      
+      double range = dayHigh - dayLow;
+      if(range <= 0.0) return false;
+      
+      // Define 25% and 75% boundaries of the daily range
+      double lowThreshold = dayLow + range * 0.25;
+      double highThreshold = dayLow + range * 0.75;
+      
+      // If price is stuck in the middle 50% zone, block it!
+      if(currentPrice > lowThreshold && currentPrice < highThreshold)
+      {
+         return true;
+      }
+      
+      return false;
+   }
+
    string GetRegimeStateName()
    {
       ENUM_MARKET_REGIME_STATE state = GetRegimeState();

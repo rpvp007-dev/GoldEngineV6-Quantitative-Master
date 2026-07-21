@@ -33,26 +33,26 @@ public:
       // Case 1: CHOP DEAD -> Reject trade completely
       if(state == REGIME_STATE_CHOP_DEAD)
       {
-         m_logger.Warning("[V6 TARGET ENGINE] Trade Blocked: Market in STATE_CHOP_DEAD (ATR < 6 pips or ADX < 14)");
+         m_logger.Warning("[V6 TARGET ENGINE] Trade Blocked: Market in STATE_CHOP_DEAD (ATR < 35.0 pips or ADX < 20.0)");
          return false;
       }
 
       double slDistance = 0.0;
       double tpDistance = 0.0;
 
-      // Case 2: TRENDING -> Long Targets (+80 to +120 Pips), Wide BE
+      // Case 2: TRENDING -> Long Targets (+90 Pips), Symmetric 30 Pip SL
       if(state == REGIME_STATE_TRENDING)
       {
-         slDistance = MathMax(200.0, atrPoints * 1.5); // Min 20 pips
-         tpDistance = MathMax(800.0, atrPoints * 4.0); // Min 80 pips LONG TARGET
-         outBETrigger = 300.0; // 30.0 Pips BE trigger
+         slDistance = MathMax(300.0, atrPoints * 1.5); // Min 30 pips SL breathing room
+         tpDistance = MathMax(900.0, atrPoints * 4.5); // Min 90 pips LONG TARGET (1:3 Risk-Reward!)
+         outBETrigger = slDistance * 1.2;              // BE trigger at 1.2x SL (36 pips)
       }
-      // Case 3: RANGING -> Short Targets (+12 to +15 Pips), Quick Exit
+      // Case 3: RANGING -> Short Targets (+30 Pips), Symmetric 20 Pip SL
       else if(state == REGIME_STATE_RANGING)
       {
-         slDistance = MathMax(120.0, atrPoints * 1.0); // Min 12 pips
-         tpDistance = MathMax(150.0, atrPoints * 1.2); // Min 15 pips SHORT TARGET
-         outBETrigger = 120.0; // 12.0 Pips BE trigger
+         slDistance = MathMax(200.0, atrPoints * 1.0); // Min 20 pips SL breathing room
+         tpDistance = MathMax(300.0, atrPoints * 1.5); // Min 30 pips SHORT TARGET (1:1.5 Risk-Reward!)
+         outBETrigger = slDistance * 1.2;              // BE trigger at 1.2x SL (24 pips)
       }
 
       int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
