@@ -307,32 +307,36 @@ public:
        }
 
        // Strict H1 Higher-Timeframe Trend Lock (Never trade against H1 EMA 200)
-       int h1EmaHandle = iMA(_Symbol, PERIOD_H1, 200, 0, MODE_EMA, PRICE_CLOSE);
-       if(h1EmaHandle != INVALID_HANDLE)
+       // Enforce H1 Trend Lock ONLY for Trending/Breakout strategies (G-008 and G-001)
+       if(signal.StrategyName == "G-008" || signal.StrategyName == "G-001")
        {
-          double h1Ema200Val[];
-          ArraySetAsSeries(h1Ema200Val, true);
-          if(CopyBuffer(h1EmaHandle, 0, 0, 1, h1Ema200Val) > 0)
+          int h1EmaHandle = iMA(_Symbol, PERIOD_H1, 200, 0, MODE_EMA, PRICE_CLOSE);
+          if(h1EmaHandle != INVALID_HANDLE)
           {
-             double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-             if(currentPrice < h1Ema200Val[0] && signal.Signal == GEV2_SIGNAL_BUY)
+             double h1Ema200Val[];
+             ArraySetAsSeries(h1Ema200Val, true);
+             if(CopyBuffer(h1EmaHandle, 0, 0, 1, h1Ema200Val) > 0)
              {
-                outResponse.Reason = "H1 Trend Lock Blocked BUY: H1 Price is in Strong Downtrend below H1 EMA 200";
-                m_logger.Warning("[RISK] " + outResponse.Reason);
-                IndicatorRelease(h1EmaHandle);
-                outResponse.Approved = false;
-                return false;
+                double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+                if(currentPrice < h1Ema200Val[0] && signal.Signal == GEV2_SIGNAL_BUY)
+                {
+                   outResponse.Reason = "H1 Trend Lock Blocked BUY: H1 Price is in Strong Downtrend below H1 EMA 200";
+                   m_logger.Warning("[RISK] " + outResponse.Reason);
+                   IndicatorRelease(h1EmaHandle);
+                   outResponse.Approved = false;
+                   return false;
+                }
+                else if(currentPrice > h1Ema200Val[0] && signal.Signal == GEV2_SIGNAL_SELL)
+                {
+                   outResponse.Reason = "H1 Trend Lock Blocked SELL: H1 Price is in Strong Uptrend above H1 EMA 200";
+                   m_logger.Warning("[RISK] " + outResponse.Reason);
+                   IndicatorRelease(h1EmaHandle);
+                   outResponse.Approved = false;
+                   return false;
+                }
              }
-             else if(currentPrice > h1Ema200Val[0] && signal.Signal == GEV2_SIGNAL_SELL)
-             {
-                outResponse.Reason = "H1 Trend Lock Blocked SELL: H1 Price is in Strong Uptrend above H1 EMA 200";
-                m_logger.Warning("[RISK] " + outResponse.Reason);
-                IndicatorRelease(h1EmaHandle);
-                outResponse.Approved = false;
-                return false;
-             }
+             IndicatorRelease(h1EmaHandle);
           }
-          IndicatorRelease(h1EmaHandle);
        }
 
        // CRITICAL ISSUE 3 Validation: Verify signal is only BUY or SELL (Hard Check)
