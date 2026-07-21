@@ -82,6 +82,13 @@ public:
       MqlDateTime dt;
       TimeCurrent(dt);
       
+      // NEW PROTECTION 1: Completely DISABLE No-Man's Land filter during Asian Session (00:00 to 07:00 MT5 time)
+      // Because Asian session is naturally a range trading session where scalpers thrive!
+      if(dt.hour >= 0 && dt.hour < 7)
+      {
+         return false; 
+      }
+      
       // Calculate bars since 00:00 today (M15 timeframe)
       int barsToday = dt.hour * 4 + dt.min / 15;
       if(barsToday <= 0) return false;
@@ -107,7 +114,7 @@ public:
       // Calculate daily range so far in Pips
       double rangePips = range / (point * 10.0);
       
-      // NEW PROTECTION: If daily range so far is less than 30.0 Pips ($3.00),
+      // NEW PROTECTION 2: If daily range so far is less than 30.0 Pips ($3.00),
       // we do NOT block entries because the morning session range is still expanding!
       if(rangePips < 30.0)
       {
