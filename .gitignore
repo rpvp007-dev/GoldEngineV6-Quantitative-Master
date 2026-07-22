@@ -5,9 +5,13 @@
 *.bak
 
 # Local strategy files
-Experts/GoldEngineV7.*
-Experts/GoldEngineV8.*
-Experts/GoldEngineV10.*
+Experts/GoldEngineV7.mq5
+Experts/GoldEngineV7.ex5
+Experts/GoldEngineV8.mq5
+Experts/GoldEngineV8.ex5
+Experts/GoldEngineV10.mq5
+Experts/GoldEngineV10.ex5
+Experts/GoldEngineV10_M1_Breakout.ex5
 compile_v7.log
 compile_v8.log
 compile_v10.log
