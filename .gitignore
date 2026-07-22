@@ -7,6 +7,8 @@
 # Local strategy files
 Experts/GoldEngineV7.*
 Experts/GoldEngineV8.*
+Experts/GoldEngineV10.*
 compile_v7.log
 compile_v8.log
+compile_v10.log
 
