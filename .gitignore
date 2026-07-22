@@ -3,3 +3,8 @@
 *.csv
 *.tmp
 *.bak
+
+# Local strategy files
+Experts/GoldEngineV7.*
+compile_v7.log
+
