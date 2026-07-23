@@ -3485,15 +3485,8 @@ void DrawICTVisualBoxes()
 //+------------------------------------------------------------------+
 void CleanUpVisualBoxes()
 {
-   int total = ObjectsTotal(0, 0, OBJ_RECTANGLE);
-   for(int i = total - 1; i >= 0; i--)
-   {
-      string name = ObjectName(0, i, 0, OBJ_RECTANGLE);
-      if(StringFind(name, "GE_OB_") == 0 || StringFind(name, "GE_FVG_") == 0)
-      {
-         ObjectDelete(0, name);
-      }
-   }
+   ObjectsDeleteAll(0, "GE_OB_");
+   ObjectsDeleteAll(0, "GE_FVG_");
 }
 
 void OnTick()
