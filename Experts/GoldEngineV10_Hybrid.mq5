@@ -635,12 +635,26 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
       ObjectSetInteger(0, "DbBias", OBJPROP_COLOR, C'255,179,0'); // Yellow
    
    // AI Decision
-   ObjectSetString(0, "DbDecision",  OBJPROP_TEXT, "AI Decision     : " + g_aiDecision);
-   if(StringFind(g_aiDecision, "BUY") >= 0)
+   string displayDecision = g_aiDecision;
+   if(CountActiveTrades() > 0)
+   {
+      for(int idx = 0; idx < PositionsTotal(); idx++)
+      {
+         if(PositionGetSymbol(idx) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
+         {
+            ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+            displayDecision = (posType == POSITION_TYPE_BUY) ? "HOLDING BUY" : "HOLDING SELL";
+            break;
+         }
+      }
+   }
+   
+   ObjectSetString(0, "DbDecision",  OBJPROP_TEXT, "AI Decision     : " + displayDecision);
+   if(StringFind(displayDecision, "BUY") >= 0)
       ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, C'76,175,80');  // Green
-   else if(StringFind(g_aiDecision, "SELL") >= 0)
+   else if(StringFind(displayDecision, "SELL") >= 0)
       ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, C'239,83,80'); // Red
-   else if(StringFind(g_aiDecision, "HOLD") >= 0)
+   else if(StringFind(displayDecision, "HOLD") >= 0)
       ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, C'255,179,0'); // Yellow
    else
       ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, clrWhite);
