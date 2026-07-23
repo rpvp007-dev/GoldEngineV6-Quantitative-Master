@@ -135,8 +135,8 @@ input group "--- Target Timeframe Selection ---"
 input ENUM_TF_MODE InpTimeframeMode = TF_AUTO;    // Target Chart Timeframe Mode
 
 input group "--- AI Engine Settings ---"
-input string   InpGeminiAPIKey       = "AIzaSyB6PZqz_ck3sGIsr2XmBTK6Qo02zpkSt60"; // Gemini API Key (aistudio.google.com)
-input string   InpGroqAPIKey         = "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"; // Groq API Key (console.groq.com)
+input string   InpGeminiAPIKey       = ""; // Gemini API Key (aistudio.google.com)
+input string   InpGroqAPIKey         = ""; // Groq API Key (console.groq.com)
 input bool     InpUseAIEngines       = true;    // Enable AI Brain Integration
 input ENUM_AI_ENGINE InpAIEngineSelection = AI_GROQ; // AI Engine Selection
 input int      InpMinConviction      = 50;      // Minimum AI Conviction to trade (0-100)
