@@ -3075,6 +3075,7 @@ int OnInit()
    TimeCurrent(dt);
    g_lastDay = dt.day;
    
+   CleanUpVisualBoxes();
    return(INIT_SUCCEEDED);
 }
 
@@ -3083,6 +3084,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+   CleanUpVisualBoxes();
    Comment(""); 
    IndicatorRelease(g_emaHandle);
    IndicatorRelease(g_emaHigherHandle);
@@ -3679,6 +3681,23 @@ void DrawICTVisualBoxes()
    }
 }
 
+
+//+------------------------------------------------------------------+
+//| Clean up any leftover visual FVG/OB rectangles from the chart    |
+//+------------------------------------------------------------------+
+void CleanUpVisualBoxes()
+{
+   int total = ObjectsTotal(0, 0, OBJ_RECTANGLE);
+   for(int i = total - 1; i >= 0; i--)
+   {
+      string name = ObjectName(0, i, 0, OBJ_RECTANGLE);
+      if(StringFind(name, "GE_OB_") == 0 || StringFind(name, "GE_FVG_") == 0)
+      {
+         ObjectDelete(0, name);
+      }
+   }
+}
+
 void OnTick()
 {
    // Process AI Hedging Recovery
@@ -3775,8 +3794,7 @@ void OnTick()
    
    if(isNewBar)
    {
-      // Draw FVG & Order Block Visual Boxes on new bar close
-      DrawICTVisualBoxes();
+
       if(g_lastBarTime != 0)
       {
          ManageCandleCloseLossCutting(useReversionMode);
