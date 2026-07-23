@@ -2340,8 +2340,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
         // --- SIDEWAYS RANGE MODE (Limit Orders) ---
         double reversionOffset = (InpTimeframeMode == TF_M1 || (InpTimeframeMode == TF_AUTO && _Period == PERIOD_M1)) ? 0.08 : 0.15;
         
-        bool placeBuy = (g_dailySentiment != "SELL_ONLY") && (!aiActive || StringFind(g_aiDecision, "BUY") >= 0);
-        bool placeSell = (g_dailySentiment != "BUY_ONLY") && (!aiActive || StringFind(g_aiDecision, "SELL") >= 0);
+        bool placeBuy = (g_dailySentiment != "SELL_ONLY");
+        bool placeSell = (g_dailySentiment != "BUY_ONLY");
        
        if(placeBuy)
        {
