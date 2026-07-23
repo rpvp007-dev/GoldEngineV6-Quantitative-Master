@@ -229,6 +229,45 @@ double RoundToStep(double value, double step)
    return NormalizeDouble(MathRound(value / step) * step, _Digits);
 }
 
+string GetCandlePattern(int index)
+{
+   double openPrice  = iOpen(_Symbol, _Period, index);
+   double highPrice  = iHigh(_Symbol, _Period, index);
+   double lowPrice   = iLow(_Symbol, _Period, index);
+   double closePrice = iClose(_Symbol, _Period, index);
+   
+   double range = highPrice - lowPrice;
+   if(range <= 0.0) return "Normal";
+   
+   double body = MathAbs(closePrice - openPrice);
+   double upperWick = highPrice - MathMax(openPrice, closePrice);
+   double lowerWick = MathMin(openPrice, closePrice) - lowPrice;
+   
+   // Doji check
+   if(body / range < 0.1) return "Doji (Indecision)";
+   
+   // Hammer / Pin Bar check (Bullish Rejection)
+   if(lowerWick / range > 0.6 && upperWick / range < 0.2)
+      return "Hammer (Bullish Rejection)";
+      
+   // Shooting Star check (Bearish Rejection)
+   if(upperWick / range > 0.6 && lowerWick / range < 0.2)
+      return "Shooting Star (Bearish Rejection)";
+      
+   // Engulfing check (requires index + 1)
+   double prevOpen  = iOpen(_Symbol, _Period, index + 1);
+   double prevClose = iClose(_Symbol, _Period, index + 1);
+   double prevBody  = MathAbs(prevClose - prevOpen);
+   
+   if(closePrice > openPrice && prevClose < prevOpen && body > prevBody && openPrice <= prevClose && closePrice >= prevOpen)
+      return "Bullish Engulfing";
+      
+   if(closePrice < openPrice && prevClose > prevOpen && body > prevBody && openPrice >= prevClose && closePrice <= prevOpen)
+      return "Bearish Engulfing";
+      
+   return (closePrice > openPrice) ? "Bullish Candle" : "Bearish Candle";
+}
+
 //+------------------------------------------------------------------+
 //| Update running spread buffer on every single tick                |
 //+------------------------------------------------------------------+
@@ -1898,6 +1937,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    else if(prevClose < currentEMA200 && prevClose < currentVWAP)
       trendDesc = "Strong Bearish Trend (Price is below EMA200 and VWAP)";
    
+   string candlePatterns = StringFormat("Bar 1: %s, Bar 2: %s, Bar 3: %s", GetCandlePattern(1), GetCandlePattern(2), GetCandlePattern(3));
+
    string tradeHistory = "";
    GetRecentTradesHistory(tradeHistory);
    
@@ -1913,10 +1954,11 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "Upcoming High-Impact News today: %s. "+
       "Price History (Active Timeframe): %s. "+
       "Macro Price History (Higher Timeframe): %s. "+
+      "Candle Patterns (Last 3 Bars): %s. "+
       "Recent closed trades history: %s. "+
       "Untested Price Magnets (Liquidity Pools): %s. "+
-      "As a professional self-correcting quant trader, analyze the macro trend, price history, and GNN magnets. "+
-      "Instructions: During strong trends (Price below/above EMA200 and VWAP with high ADX), you MUST trade in the direction of the trend (e.g. SELL if trend is bearish, BUY if bullish) and set take_profit_price EXACTLY at the nearest untested GNN Magnet level in that direction (e.g. nearest Aqua low for SELL, nearest Golden high for BUY) to capture the trend expansion. "+
+      "As a professional self-correcting quant trader, analyze the macro trend, price history, candle patterns (like Hammer/Pin Bar wicks representing rejection at support/resistance floors), and GNN magnets. "+
+      "Instructions: During strong trends, trade in the direction of the trend. Identify wick rejections (e.g., Hammers at Support, Shooting Stars at Resistance) and adjust your decision or stop loss buffer to let wicks breathe and reverse instead of being stopped out prematurely. "+
       "Respond strictly with a JSON object containing: "+
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
@@ -1927,7 +1969,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words explaining decision and why you adjusted based on recent trades). "+
       "Example output: { 'decision': 'SELL', 'conviction': 90, 'regime': 'BREAKOUT', 'strategy': 'VOLUME_BREAKOUT', 'horizon': 'LONG_TERM', 'stop_loss_price': 4102.50, 'take_profit_price': 4080.00, 'reason': 'Strong bearish trend below VWAP targeting Aqua liquidity pool' }.",
-      prevClose, trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, tradeHistory, magnetDesc
+      prevClose, trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, candlePatterns, tradeHistory, magnetDesc
    );
 
    bool aiActive = false;
