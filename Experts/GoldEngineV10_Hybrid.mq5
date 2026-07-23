@@ -490,14 +490,25 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
    else if(period == PERIOD_M15) tfName = "M15 (15-Minute)";
    else if(period == PERIOD_H1) tfName = "H1 (1-Hour)";
    
-   string modeStr = reversionModeActive ? "SIDEWAYS (Limits)" : "TRENDING (Stops)";
-   if(g_aiStrategy != "NONE" && g_aiStrategy != "")
+   string modeStr = reversionModeActive ? "SIDEWAYS" : "TRENDING";
+   string shortStrategy = g_aiStrategy;
+   if(shortStrategy == "MEAN_REVERSION") shortStrategy = "Mean Rev";
+   else if(shortStrategy == "VOLUME_BREAKOUT") shortStrategy = "Vol Break";
+   else if(shortStrategy == "DONCHIAN_BREAKOUT") shortStrategy = "Donchian";
+   else if(shortStrategy == "VWAP_PULLBACK") shortStrategy = "VWAP Pull";
+   else if(shortStrategy == "PULLBACK") shortStrategy = "Pullback";
+   else if(shortStrategy == "STRADDLE") shortStrategy = "Straddle";
+   else if(shortStrategy == "SCALPING") shortStrategy = "Scalp";
+   else if(shortStrategy == "BREAKOUT") shortStrategy = "Breakout";
+   
+   if(shortStrategy != "NONE" && shortStrategy != "")
    {
-      modeStr += " (" + g_aiStrategy + ")";
+      modeStr += " (" + shortStrategy + ")";
    }
    if(InpUseAIEngines && g_tradeHorizon != "")
    {
-      modeStr += " [" + g_tradeHorizon + "]";
+      string shortHorizon = (g_tradeHorizon == "LONG_TERM") ? "LONG" : "SHORT";
+      modeStr += " [" + shortHorizon + "]";
    }
    
    ObjectSetString(0, "DbTimeframe", OBJPROP_TEXT, "Chart Timeframe : " + tfName);
@@ -545,11 +556,11 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
    else
       ObjectSetInteger(0, "DbConviction", OBJPROP_COLOR, C'239,83,80'); // Red
    
-   // AI Reason (truncated at 32 chars to fit panel nicely)
+   // AI Reason (truncated at 60 chars to fit panel nicely)
    string cleanReason = g_aiReason;
-   if(StringLen(cleanReason) > 32)
+   if(StringLen(cleanReason) > 60)
    {
-      cleanReason = StringSubstr(cleanReason, 0, 29) + "...";
+      cleanReason = StringSubstr(cleanReason, 0, 57) + "...";
    }
    ObjectSetString(0, "DbReason",    OBJPROP_TEXT, "AI Reason       : " + cleanReason);
    
