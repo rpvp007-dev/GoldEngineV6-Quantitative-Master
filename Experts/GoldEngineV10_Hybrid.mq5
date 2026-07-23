@@ -1039,14 +1039,14 @@ void ManageCandleCloseLossCutting(bool reversionModeActive)
             
             if(type == POSITION_TYPE_BUY)
             {
-               if(InpEnableRejectionExit && prevClose < prevOpen && !reversionModeActive)
+               if(InpEnableRejectionExit && prevClose < prevOpen && !reversionModeActive && g_tradeHorizon != "LONG_TERM")
                {
                   Print(StringFormat("[V10 SOFT STOP] Closing BUY ticket #%I64u due to Bearish Close.", ticket));
                   trade.PositionClose(ticket);
                   continue;
                }
                
-               if(InpEnableCandleTrail && !reversionModeActive)
+               if(InpEnableCandleTrail && !reversionModeActive && g_tradeHorizon != "LONG_TERM")
                {
                   double targetSL = NormalizeDouble(prevLow - g_candleTrailBuffer, _Digits);
                   if(targetSL > currentSL || currentSL == 0.0)
@@ -1064,14 +1064,14 @@ void ManageCandleCloseLossCutting(bool reversionModeActive)
             }
             else if(type == POSITION_TYPE_SELL)
             {
-               if(InpEnableRejectionExit && prevClose > prevOpen && !reversionModeActive)
+               if(InpEnableRejectionExit && prevClose > prevOpen && !reversionModeActive && g_tradeHorizon != "LONG_TERM")
                {
                   Print(StringFormat("[V10 SOFT STOP] Closing SELL ticket #%I64u due to Bullish Close.", ticket));
                   trade.PositionClose(ticket);
                   continue;
                }
                
-               if(InpEnableCandleTrail && !reversionModeActive)
+               if(InpEnableCandleTrail && !reversionModeActive && g_tradeHorizon != "LONG_TERM")
                {
                   double targetSL = NormalizeDouble(prevHigh + g_candleTrailBuffer, _Digits);
                   if(targetSL < currentSL || currentSL == 0.0)
@@ -2074,7 +2074,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "Recent closed trades history: %s. "+
       "Untested Price Magnets (Liquidity Pools): %s. "+
       "As a professional self-correcting quant trader, analyze the macro trend, price history, candle patterns (like Hammer/Pin Bar wicks representing rejection at support/resistance floors), and GNN magnets. "+
-      "Instructions: 1. During strong trends (ADX > 25.0 and clear direction above/below EMA200/VWAP), you are highly encouraged to execute a LONG_TERM trade in the direction of the trend (e.g., using VOLUME_BREAKOUT or DONCHIAN_BREAKOUT) to capture a major multi-hour move (targeting 30-50+ points) with a wide Stop Loss. 2. If the price has deeply retraced to a macro GNN support floor (like Aqua lines) and you detect a bullish rejection (Hammers/long lower shadows), issue a LONG_TERM BUY swing trade targeting the Golden GNN resistance ceiling (50+ points above) with a wide Stop Loss below the support floor. 3. Conversely, if price has spiked to a Golden resistance ceiling and shows bearish rejection (Shooting Stars), issue a LONG_TERM SELL swing trade targeting the Aqua support floor. 4. LONG_TERM trades bypass all time decay exits and are intended to run for 4-5 hours to secure large trend gains, even with small lot sizes. Identify wick rejections and adjust your decision or stop loss buffer to let wicks breathe. "+
+      "Instructions: 1. During strong trends (ADX > 25.0 and clear direction above/below EMA200/VWAP), you are highly encouraged to execute a LONG_TERM trade in the direction of the trend (e.g., using VOLUME_BREAKOUT or DONCHIAN_BREAKOUT) to capture a major multi-hour move (targeting 30-50+ points) with a wide Stop Loss. 2. If the price has deeply retraced to a macro GNN support floor (like Aqua lines) and you detect a bullish rejection (Hammers/long lower shadows), issue a LONG_TERM BUY swing trade targeting the Golden GNN resistance ceiling (50+ points above) with a wide Stop Loss below the support floor. 3. Conversely, if price has spiked to a Golden resistance ceiling and shows bearish rejection (Shooting Stars), issue a LONG_TERM SELL swing trade targeting the Aqua support floor. 4. LONG_TERM trades bypass all time decay exits and are intended to run for 4-5 hours to secure large trend gains, even with small lot sizes. 5. CRITICAL: Do NOT execute SELL trades when the price is close to (within 5 points of) an untested GNN Support floor (Aqua line), and do NOT execute BUY trades when the price is close to (within 5 points of) an untested GNN Resistance ceiling (Golden line). Selling the support floor or buying the resistance ceiling leads to instant losses on pullbacks. Wait for a breakout or trade the bounce. Identify wick rejections and adjust your decision or stop loss buffer to let wicks breathe. "+
       "Respond strictly with a JSON object containing: "+
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
