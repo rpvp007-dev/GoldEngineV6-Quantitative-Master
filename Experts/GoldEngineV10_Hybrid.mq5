@@ -204,12 +204,14 @@ bool CalculateReversionMode(double adxVal, bool isMomHour, bool isVolSpike, bool
 {
    if(!InpEnableHybridMode) return false;
    
+   // Global Trend Guard: if ADX shows a very strong trend, NEVER reversion trade range limits
+   if(adxVal > 25.0) return false;
+   
    if(adxVal < g_minADX) return true;
    
    if(InpUseSessionHours && !isMomHour)
    {
       if(isVolSpike) return false;
-      if(adxVal > 25.0) return false; // ADX Trend Guard: do not reversion trade in strong trends
       return true;
    }
    
