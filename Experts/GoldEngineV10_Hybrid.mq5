@@ -484,8 +484,16 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
    if(reversionModeActive)
       ObjectSetInteger(0, "DbMode", OBJPROP_COLOR, C'255,179,0'); 
    else
-      ObjectSetInteger(0, "DbMode", OBJPROP_COLOR, C'76,175,80');  
-      
+      ObjectSetInteger(0, "DbMode", OBJPROP_COLOR, C'76,175,80');
+       
+   double nearestHigh = 0.0;
+   double nearestLow = 0.0;
+   string tempStr = "";
+   GetUntestedMagnets(tempStr, nearestHigh, nearestLow);
+    
+   DrawMagnetLine("MagnetHighLine", nearestHigh, C'255,215,0'); // Gold
+   DrawMagnetLine("MagnetLowLine", nearestLow, C'0,255,255');   // Aqua
+
    ChartRedraw();
 }
 
@@ -1328,6 +1336,152 @@ double GetDailyVWAP()
 }
 
 //+------------------------------------------------------------------+
+//| Get Untested Swing High/Low Magnets and Draw them on chart       |
+//+------------------------------------------------------------------+
+void GetUntestedMagnets(string &outputStr, double &nearestHigh, double &nearestLow)
+{
+   nearestHigh = 0.0;
+   nearestLow = 0.0;
+   outputStr = "";
+   
+   int lookback = 150;
+   double highs[];
+   double lows[];
+   ArraySetAsSeries(highs, true);
+   ArraySetAsSeries(lows, true);
+   
+   if(CopyHigh(_Symbol, _Period, 1, lookback, highs) <= 0 ||
+      CopyLow(_Symbol, _Period, 1, lookback, lows) <= 0)
+   {
+      outputStr = "Failed to copy high/low series.";
+      return;
+   }
+   
+   double untestedHighs[];
+   double untestedLows[];
+   int highAges[];
+   int lowAges[];
+   
+   ArrayResize(untestedHighs, 0);
+   ArrayResize(untestedLows, 0);
+   ArrayResize(highAges, 0);
+   ArrayResize(lowAges, 0);
+   
+   double currentPrice = iClose(_Symbol, _Period, 1);
+   
+   // Find fractal swing highs/lows
+   for(int i = 2; i < lookback - 2; i++)
+   {
+      // Swing High: higher than 2 left and 2 right
+      if(highs[i] > highs[i-1] && highs[i] > highs[i-2] &&
+         highs[i] > highs[i+1] && highs[i] > highs[i+2])
+      {
+         bool tested = false;
+         for(int k = 1; k < i; k++)
+         {
+            if(highs[k] > highs[i])
+            {
+               tested = true;
+               break;
+            }
+         }
+         if(!tested)
+         {
+            int sz = ArraySize(untestedHighs);
+            ArrayResize(untestedHighs, sz + 1);
+            ArrayResize(highAges, sz + 1);
+            untestedHighs[sz] = highs[i];
+            highAges[sz] = i + 1;
+         }
+      }
+      
+      // Swing Low: lower than 2 left and 2 right
+      if(lows[i] < lows[i-1] && lows[i] < lows[i-2] &&
+         lows[i] < lows[i+1] && lows[i] < lows[i+2])
+      {
+         bool tested = false;
+         for(int k = 1; k < i; k++)
+         {
+            if(lows[k] < lows[i])
+            {
+               tested = true;
+               break;
+            }
+         }
+         if(!tested)
+         {
+            int sz = ArraySize(untestedLows);
+            ArrayResize(untestedLows, sz + 1);
+            ArrayResize(lowAges, sz + 1);
+            untestedLows[sz] = lows[i];
+            lowAges[sz] = i + 1;
+         }
+      }
+   }
+   
+   double minHighDiff = 999999.0;
+   double minLowDiff = 999999.0;
+   string highsDesc = "";
+   string lowsDesc = "";
+   
+   for(int i = 0; i < ArraySize(untestedHighs); i++)
+   {
+      double diff = untestedHighs[i] - currentPrice;
+      if(diff > 0.0 && diff < minHighDiff)
+      {
+         minHighDiff = diff;
+         nearestHigh = untestedHighs[i];
+      }
+      if(i < 3)
+      {
+         highsDesc += StringFormat("[Price=%.2f, Age=%d bars, Dist=%.2f] ", untestedHighs[i], highAges[i], diff);
+      }
+   }
+   
+   for(int i = 0; i < ArraySize(untestedLows); i++)
+   {
+      double diff = currentPrice - untestedLows[i];
+      if(diff > 0.0 && diff < minLowDiff)
+      {
+         minLowDiff = diff;
+         nearestLow = untestedLows[i];
+      }
+      if(i < 3)
+      {
+         lowsDesc += StringFormat("[Price=%.2f, Age=%d bars, Dist=%.2f] ", untestedLows[i], lowAges[i], diff);
+      }
+   }
+   
+   if(highsDesc == "") highsDesc = "None";
+   if(lowsDesc == "") lowsDesc = "None";
+   
+   outputStr = "Untested Swing High Price Magnets: " + highsDesc + ". Untested Swing Low Price Magnets: " + lowsDesc;
+}
+
+void DrawMagnetLine(string name, double price, color clr)
+{
+   if(price <= 0.0)
+   {
+      ObjectDelete(0, name);
+      return;
+   }
+   
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
+      ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DASH);
+      ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   }
+   else
+   {
+      ObjectSetDouble(0, name, OBJPROP_PRICE, price);
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Donchian Channel High/Low and dynamic Stop Loss calculation     |
 //+------------------------------------------------------------------+
 double GetChannelHigh(int length)
@@ -1472,12 +1626,17 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    GetRecentTradesHistory(tradeHistory);
    
    g_aiStrategy = "NONE";
+    
+   string magnetDesc = "";
+   double dummyHigh = 0.0, dummyLow = 0.0;
+   GetUntestedMagnets(magnetDesc, dummyHigh, dummyLow);
 
    string prompt = StringFormat(
       "Gold (XAUUSD) setup analysis. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
       "Price History: %s. "+
       "Recent closed trades history: %s. "+
-      "As a professional self-correcting quant trader, analyze the recent trade outcomes, evaluate current structure, select the optimal strategy, and classify the hold time horizon (short quick trades vs long trend trades). "+
+      "Untested Price Magnets (Liquidity Pools): %s. "+
+      "As a professional self-correcting quant trader, analyze the recent trade outcomes, evaluate current structure and structural price magnets, select the optimal strategy, and classify the hold time horizon (short quick trades vs long trend trades). "+
       "Respond strictly with a JSON object containing: "+
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
@@ -1488,7 +1647,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words explaining decision and why you adjusted based on recent trades). "+
       "Example output: { 'decision': 'BUY', 'conviction': 80, 'regime': 'BREAKOUT', 'strategy': 'VOLUME_BREAKOUT', 'horizon': 'LONG_TERM', 'stop_loss_price': 4102.50, 'take_profit_price': 4118.00, 'reason': 'Volume breakout above Donchian channel with volume surge' }.",
-      prevClose, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, barsHistory, tradeHistory
+      prevClose, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, barsHistory, tradeHistory, magnetDesc
    );
 
    bool aiActive = false;
@@ -2271,6 +2430,9 @@ void OnDeinit(const int reason)
    ObjectDelete(0, "DbConviction");
    ObjectDelete(0, "DbReason");
    ObjectDelete(0, "BtnEAToggle");
+   
+   ObjectDelete(0, "MagnetHighLine");
+   ObjectDelete(0, "MagnetLowLine");
 }
 
 //+------------------------------------------------------------------+
