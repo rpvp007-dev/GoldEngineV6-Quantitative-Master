@@ -923,12 +923,12 @@ string GetGeminiDecision(double adx, double atr, double rsi, double ema)
    double prevHigh  = iHigh(_Symbol, _Period, 1);
    double prevLow   = iLow(_Symbol, _Period, 1);
    
-   // Formulate detailed, concise analytical prompt
+   // Formulate prompt using single quotes for the instruction to avoid JSON escaping errors
    string prompt = StringFormat(
       "Gold (XAUUSD) M1 candle closed. Metrics: Open=%.2f, Close=%.2f, High=%.2f, Low=%.2f. "+
       "Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA(50)=%.2f. "+
       "As a quant, evaluate if this price action is a breakout or reversion. "+
-      "Respond strictly with a JSON object format: {\\\"decision\\\": \\\"BUY\\\"} or {\\\"decision\\\": \\\"SELL\\\"} or {\\\"decision\\\": \\\"HOLD\\\"}. Do not write any other text.",
+      "Respond strictly with a JSON object format: { 'decision': 'BUY' } or { 'decision': 'SELL' } or { 'decision': 'HOLD' }. Do not write any other text.",
       prevOpen, prevClose, prevHigh, prevLow, adx, atr, rsi, ema
    );
    
