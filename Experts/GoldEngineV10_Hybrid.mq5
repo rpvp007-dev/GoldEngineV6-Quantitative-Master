@@ -1097,6 +1097,9 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       g_aiReason = "AI Engine is disabled.";
    }
 
+   // Lock queries for the current candle to exactly once
+   g_lastOrderPlacedBarTime = currentBarTime;
+
    // Dynamic Risk Scaling factor based on conviction
    double convictionMultiplier = 1.0;
    if(aiActive)
@@ -1149,7 +1152,6 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          trade.SellLimit(finalLotSize, sellLimitPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AI Sell Limit Reversion");
       }
       
-      g_lastOrderPlacedBarTime = currentBarTime;
       return true;
    }
    else
@@ -1228,7 +1230,6 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       
       if(orderPlaced)
       {
-         g_lastOrderPlacedBarTime = currentBarTime;
          return true;
       }
    }
