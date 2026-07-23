@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, GoldEngine V10"
 #property link      "https://github.com/rpvp007-dev"
-#property version   "16.10"
+#property version   "17.00"
 
 #include <Trade\Trade.mqh>
 
@@ -23,9 +23,10 @@ enum ENUM_TF_MODE {
 input group "--- Target Timeframe Selection ---"
 input ENUM_TF_MODE InpTimeframeMode = TF_AUTO;    // Target Chart Timeframe Mode
 
-input group "--- Gemini AI Engine Settings ---"
-input string   InpGeminiAPIKey       = "AIzaSyB6PZqz_ck3sGIsr2XmBTK6Qo02zpkSt60"; // Gemini API Key (Get from aistudio.google.com)
-input bool     InpUseGeminiAI        = true;    // Use Gemini AI for Trade Decisions
+input group "--- AI Engine Settings ---"
+input string   InpGeminiAPIKey       = "AIzaSyB6PZqz_ck3sGIsr2XmBTK6Qo02zpkSt60"; // Gemini API Key (aistudio.google.com)
+input string   InpGroqAPIKey         = "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"; // Groq API Key (console.groq.com)
+input bool     InpUseGeminiAI        = true;    // Use AI Engines for Trade Decisions
 input int      InpMinConviction      = 50;      // Minimum AI Conviction to trade (0-100)
 
 input group "--- Core Risk Settings ---"
@@ -407,11 +408,11 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
    ObjectSetString(0, "DbReason",    OBJPROP_TEXT, "AI Reason       : " + cleanReason);
    
    // Color coding for AI Decision
-   if(g_aiDecision == "BUY")
+   if(StringFind(g_aiDecision, "BUY") >= 0)
       ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, C'76,175,80');  // Green
-   else if(g_aiDecision == "SELL")
+   else if(StringFind(g_aiDecision, "SELL") >= 0)
       ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, C'239,83,80'); // Red
-   else if(g_aiDecision == "HOLD")
+   else if(StringFind(g_aiDecision, "HOLD") >= 0)
       ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, C'255,179,0'); // Yellow
    else
       ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, clrWhite);
@@ -927,9 +928,6 @@ bool QueryGeminiConvictionEngine(double adx, double atr, double rsi, double ema)
 {
    if(InpGeminiAPIKey == "" || InpGeminiAPIKey == "PASTE_YOUR_API_KEY_HERE")
    {
-      g_aiDecision = "LOCAL RULES";
-      g_aiConviction = 0;
-      g_aiReason = "No API Key configured.";
       return false;
    }
    
@@ -943,13 +941,13 @@ bool QueryGeminiConvictionEngine(double adx, double atr, double rsi, double ema)
    
    double prevClose = iClose(_Symbol, _Period, 1);
    
-   // Formulate an intelligent prompt describing the complete market picture
+   // Formulate prompt
    string prompt = StringFormat(
       "Gold (XAUUSD) M1 setup analysis. Spread=%.2f. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f. "+
       "Price History: %s. "+
       "As a professional quant, determine the highest probability direction. "+
       "Respond strictly with a JSON object containing: 'decision' (BUY, SELL, or HOLD), 'conviction' (integer confidence score 0 to 100), and 'reason' (short 10-word summary). "+
-      "Example output format: { 'decision': 'BUY', 'conviction': 85, 'reason': 'Strong momentum cross' }. Do not write markdown blocks or any other text.",
+      "Example output format: { 'decision': 'BUY', 'conviction': 85, 'reason': 'Strong momentum cross' }.",
       GetSmoothedSpread(), prevClose, adx, atr, rsi, ema, priceHistory
    );
    
@@ -972,31 +970,102 @@ bool QueryGeminiConvictionEngine(double adx, double atr, double rsi, double ema)
    if(res != 200)
    {
       string errorResponse = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-      Print("[Conviction Engine Error] HTTP Response: ", res, ", Response: ", errorResponse);
-      g_aiDecision = "API ERROR";
-      g_aiConviction = 0;
-      g_aiReason = "Gemini API connection failed.";
+      Print("[Gemini API Error] HTTP Response: ", res, ", Response: ", errorResponse);
       return false;
    }
    
    string responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
    
-   // Extract values cleanly using our JSON parser
    string rawDecision = ExtractJSONValue(responseText, "decision");
    string rawConviction = ExtractJSONValue(responseText, "conviction");
    string rawReason = ExtractJSONValue(responseText, "reason");
    
-   // Clean decision string
-   if(StringFind(rawDecision, "BUY") >= 0) g_aiDecision = "BUY";
-   else if(StringFind(rawDecision, "SELL") >= 0) g_aiDecision = "SELL";
-   else if(StringFind(rawDecision, "HOLD") >= 0) g_aiDecision = "HOLD";
-   else g_aiDecision = "HOLD";
+   if(StringFind(rawDecision, "BUY") >= 0) g_aiDecision = "BUY (Gemini)";
+   else if(StringFind(rawDecision, "SELL") >= 0) g_aiDecision = "SELL (Gemini)";
+   else if(StringFind(rawDecision, "HOLD") >= 0) g_aiDecision = "HOLD (Gemini)";
+   else g_aiDecision = "HOLD (Gemini)";
    
    g_aiConviction = (int)StringToInteger(rawConviction);
    if(g_aiConviction < 0) g_aiConviction = 0;
    if(g_aiConviction > 100) g_aiConviction = 100;
    
-   g_aiReason = (rawReason != "") ? rawReason : "AI analyzed successfully.";
+   g_aiReason = (rawReason != "") ? rawReason : "Gemini analyzed successfully.";
+   
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Query Groq Llama-3.1 API for market direction & conviction score |
+//+------------------------------------------------------------------+
+bool QueryGroqConvictionEngine(double adx, double atr, double rsi, double ema)
+{
+   if(InpGroqAPIKey == "" || InpGroqAPIKey == "PASTE_YOUR_API_KEY_HERE")
+   {
+      return false;
+   }
+   
+   // Gather candle history for smart price action reading (last 5 candles)
+   string priceHistory = "";
+   for(int i = 5; i >= 1; i--)
+   {
+      priceHistory += StringFormat("[Bar %d: O=%.2f, H=%.2f, L=%.2f, C=%.2f, V=%I64d] ", 
+         i, iOpen(_Symbol, _Period, i), iHigh(_Symbol, _Period, i), iLow(_Symbol, _Period, i), iClose(_Symbol, _Period, i), iVolume(_Symbol, _Period, i));
+   }
+   
+   double prevClose = iClose(_Symbol, _Period, 1);
+   
+   // Formulate prompt
+   string prompt = StringFormat(
+      "Gold (XAUUSD) M1 setup analysis. Spread=%.2f. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f. "+
+      "Price History: %s. "+
+      "As a professional quant, determine the highest probability direction. "+
+      "Respond strictly with a JSON object containing: 'decision' (BUY, SELL, or HOLD), 'conviction' (integer confidence score 0 to 100), and 'reason' (short 10-word summary). "+
+      "Example output format: { 'decision': 'BUY', 'conviction': 85, 'reason': 'Strong momentum cross' }.",
+      GetSmoothedSpread(), prevClose, adx, atr, rsi, ema, priceHistory
+   );
+   
+   string cleanPrompt = prompt;
+   StringReplace(cleanPrompt, "\"", "\\\"");
+   
+   string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + cleanPrompt + "\"}],\"temperature\":0.2}";
+   string url = "https://api.groq.com/openai/v1/chat/completions";
+   string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpGroqAPIKey + "\r\n";
+   
+   char post[];
+   char result[];
+   string responseHeaders = "";
+   int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+   if(bytes > 0 && post[bytes-1] == 0)
+   {
+      ArrayResize(post, bytes - 1);
+   }
+   
+   ResetLastError();
+   int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
+   
+   if(res != 200)
+   {
+      string errorResponse = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+      Print("[Groq API Error] HTTP Response: ", res, ", Response: ", errorResponse);
+      return false;
+   }
+   
+   string responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+   
+   string rawDecision = ExtractJSONValue(responseText, "decision");
+   string rawConviction = ExtractJSONValue(responseText, "conviction");
+   string rawReason = ExtractJSONValue(responseText, "reason");
+   
+   if(StringFind(rawDecision, "BUY") >= 0) g_aiDecision = "BUY (Groq)";
+   else if(StringFind(rawDecision, "SELL") >= 0) g_aiDecision = "SELL (Groq)";
+   else if(StringFind(rawDecision, "HOLD") >= 0) g_aiDecision = "HOLD (Groq)";
+   else g_aiDecision = "HOLD (Groq)";
+   
+   g_aiConviction = (int)StringToInteger(rawConviction);
+   if(g_aiConviction < 0) g_aiConviction = 0;
+   if(g_aiConviction > 100) g_aiConviction = 100;
+   
+   g_aiReason = (rawReason != "") ? rawReason : "Groq analyzed successfully.";
    
    return true;
 }
@@ -1084,11 +1153,19 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       }
    }
 
-   // --- Query the AI Conviction Engine ---
+   // --- Query the AI Conviction Engine with Failover ---
    bool aiActive = false;
    if(InpUseGeminiAI)
    {
+      // Try Gemini first
       aiActive = QueryGeminiConvictionEngine(currentADX, currentATR, currentRSI, currentEMA);
+      
+      // Fallback/Failover to Groq if Gemini failed
+      if(!aiActive && InpGroqAPIKey != "" && InpGroqAPIKey != "PASTE_YOUR_API_KEY_HERE")
+      {
+         Print("[AI Failover] Gemini API unavailable. Switching to Groq Llama-3.1...");
+         aiActive = QueryGroqConvictionEngine(currentADX, currentATR, currentRSI, currentEMA);
+      }
    }
    else
    {
@@ -1133,8 +1210,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       // --- SIDEWAYS RANGE MODE (Limit Orders) ---
       double reversionOffset = (InpTimeframeMode == TF_M1 || (InpTimeframeMode == TF_AUTO && _Period == PERIOD_M1)) ? 0.08 : 0.15;
       
-      bool placeBuy = (!aiActive || g_aiDecision == "BUY");
-      bool placeSell = (!aiActive || g_aiDecision == "SELL");
+      bool placeBuy = (!aiActive || StringFind(g_aiDecision, "BUY") >= 0);
+      bool placeSell = (!aiActive || StringFind(g_aiDecision, "SELL") >= 0);
       
       if(placeBuy)
       {
@@ -1176,8 +1253,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       
       if(aiActive)
       {
-         allowBuy  = (g_aiDecision == "BUY");
-         allowSell = (g_aiDecision == "SELL");
+         allowBuy  = (StringFind(g_aiDecision, "BUY") >= 0);
+         allowSell = (StringFind(g_aiDecision, "SELL") >= 0);
       }
       else
       {
@@ -1238,55 +1315,92 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
 }
 
 //+------------------------------------------------------------------+
-//| Query Google Gemini API to test if key is valid on startup       |
+//| Query Google Gemini and Groq APIs to verify keys on startup      |
 //+------------------------------------------------------------------+
-void TestGeminiAPI()
+void TestAIEngines()
 {
-   if(InpGeminiAPIKey == "" || InpGeminiAPIKey == "PASTE_YOUR_API_KEY_HERE")
-   {
-      Print("[Gemini API Test] No API key configured.");
-      g_aiReason = "Awaiting API Key...";
-      return;
-   }
+   bool geminiSuccess = false;
+   bool groqSuccess = false;
    
-   string prompt = "Respond strictly with the single word: OK";
-   string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
-   string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + InpGeminiAPIKey;
-   string headers = "Content-Type: application/json\r\n";
-   
-   char post[];
-   char result[];
-   string responseHeaders = "";
-   int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
-   if(bytes > 0 && post[bytes-1] == 0)
+   // 1. Test Gemini
+   if(InpGeminiAPIKey != "" && InpGeminiAPIKey != "PASTE_YOUR_API_KEY_HERE")
    {
-      ArrayResize(post, bytes - 1);
-   }
-   
-   ResetLastError();
-   int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
-   
-   if(res == 200)
-   {
-      Print("[Gemini API Test] Connection successful! Your API key is valid.");
-      g_aiReason = "API Connection OK";
-      g_aiDecision = "WAITING";
-   }
-   else
-   {
-      string errText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-      Print("[Gemini API Test Failed] HTTP Status: ", res, ", Response: ", errText);
+      string prompt = "Respond strictly with the single word: OK";
+      string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
+      string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + InpGeminiAPIKey;
+      string headers = "Content-Type: application/json\r\n";
       
-      string msg = ExtractJSONValue(errText, "message");
-      if(msg != "")
+      char post[];
+      char result[];
+      string responseHeaders = "";
+      int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+      if(bytes > 0 && post[bytes-1] == 0)
       {
-         g_aiReason = "API Key Error: " + msg;
+         ArrayResize(post, bytes - 1);
+      }
+      
+      ResetLastError();
+      int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
+      
+      if(res == 200)
+      {
+         Print("[Gemini API Diagnostic] Connection successful!");
+         geminiSuccess = true;
       }
       else
       {
-         g_aiReason = StringFormat("API Error code %d", res);
+         string errText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+         Print("[Gemini API Diagnostic Failed] HTTP Status: ", res, ", Response: ", errText);
       }
+   }
+   
+   // 2. Test Groq
+   if(InpGroqAPIKey != "" && InpGroqAPIKey != "PASTE_YOUR_API_KEY_HERE")
+   {
+      string prompt = "Respond strictly with the word OK";
+      string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + prompt + "\"}],\"temperature\":0.2}";
+      string url = "https://api.groq.com/openai/v1/chat/completions";
+      string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpGroqAPIKey + "\r\n";
+      
+      char post[];
+      char result[];
+      string responseHeaders = "";
+      int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+      if(bytes > 0 && post[bytes-1] == 0)
+      {
+         ArrayResize(post, bytes - 1);
+      }
+      
+      ResetLastError();
+      int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
+      
+      if(res == 200)
+      {
+         Print("[Groq API Diagnostic] Connection successful!");
+         groqSuccess = true;
+      }
+      else
+      {
+         string errText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+         Print("[Groq API Diagnostic Failed] HTTP Status: ", res, ", Response: ", errText);
+      }
+   }
+   
+   // 3. Update Dashboard Status
+   if(geminiSuccess)
+   {
+      g_aiDecision = "WAITING";
+      g_aiReason = "Gemini API OK";
+   }
+   else if(groqSuccess)
+   {
+      g_aiDecision = "WAITING";
+      g_aiReason = "Groq API OK (Gemini Offline)";
+   }
+   else
+   {
       g_aiDecision = "API ERROR";
+      g_aiReason = "Both AI services offline";
    }
 }
 
@@ -1321,8 +1435,8 @@ int OnInit()
    // 3. Create UI elements
    CreateInterface();
    
-   // 4. Test Gemini connection live on startup
-   TestGeminiAPI();
+   // 4. Test AI Engines connection live on startup
+   TestAIEngines();
    
    return(INIT_SUCCEEDED);
 }
