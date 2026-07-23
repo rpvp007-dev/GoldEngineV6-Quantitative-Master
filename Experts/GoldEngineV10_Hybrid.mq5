@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, GoldEngine V10"
 #property link      "https://github.com/rpvp007-dev"
-#property version   "17.00"
+#property version   "18.00"
 
 #include <Trade\Trade.mqh>
 
@@ -104,6 +104,7 @@ input double   InpMinATR           = 0.50;     // Custom Minimum ATR (Volatility
 CTrade         trade;
 datetime       g_lastBarTime;
 datetime       g_lastOrderPlacedBarTime = 0; // Tracks if order was placed successfully for this candle
+int            g_lastDay = 0;                // Tracks day changes for Daily Bias calculation
 
 int            g_emaHandle;         // Local EMA handle
 int            g_emaHigherHandle;   // Higher timeframe EMA handle
@@ -142,7 +143,9 @@ double         g_candleTrailBuffer;
 // UI controls
 bool           g_eaRunning = true;  // Button state toggle
 
-// AI Conviction Outputs
+// AI Conviction & Bias Outputs
+string         g_dailySentiment = "BI_DIRECTIONAL";
+string         g_dailySentimentReason = "Analyzing macro...";
 string         g_aiDecision = "WAITING";
 int            g_aiConviction = 0;
 string         g_aiReason = "Awaiting setup...";
@@ -221,8 +224,8 @@ bool VerifyTimeframeMismatch()
       static datetime lastAlertTime = 0;
       if(TimeCurrent() - lastAlertTime > 60) // Alert at most once per minute
       {
-         Alert(msg);
          lastAlertTime = TimeCurrent();
+         Alert(msg);
       }
       return true; // Mismatch exists
    }
@@ -299,9 +302,9 @@ void UpdateButtonState()
 //+------------------------------------------------------------------+
 void CreateInterface()
 {
-   // Redesigned: 350px wide, 310px high to fit Conviction Engine parameters
+   // Redesigned: 350px wide, 330px high to fit Combined Master System
    int panelWidth  = 350;
-   int panelHeight = 310;
+   int panelHeight = 330;
    int margin      = 25;
    int textX       = 20 + margin;
    int fontSize    = 8; 
@@ -320,10 +323,11 @@ void CreateInterface()
    CreateLabel("DbMode",      textX, 172, "Active Mode     : ", fontSize, clrWhite);
    CreateLabel("DbSL",        textX, 190, "Stop Loss (ATR) : ", fontSize, clrWhite);
    
-   // AI Conviction Rows
-   CreateLabel("DbDecision",  textX, 208, "AI Decision     : ", fontSize, clrWhite);
-   CreateLabel("DbConviction",textX, 226, "AI Conviction   : ", fontSize, clrWhite);
-   CreateLabel("DbReason",    textX, 244, "AI Reason       : ", fontSize, clrWhite);
+   // AI Dashboard Rows
+   CreateLabel("DbBias",      textX, 208, "AI Daily Bias   : ", fontSize, clrWhite);
+   CreateLabel("DbDecision",  textX, 226, "AI Decision     : ", fontSize, clrWhite);
+   CreateLabel("DbConviction",textX, 244, "AI Conviction   : ", fontSize, clrWhite);
+   CreateLabel("DbReason",    textX, 262, "AI Reason       : ", fontSize, clrWhite);
    
    // 4. Create Button (Nested at the bottom of the panel with margins aligned)
    string btnName = "BtnEAToggle";
@@ -332,11 +336,12 @@ void CreateInterface()
       ObjectCreate(0, btnName, OBJ_BUTTON, 0, 0, 0);
    }
    ObjectSetInteger(0, btnName, OBJPROP_XDISTANCE, textX);
-   ObjectSetInteger(0, btnName, OBJPROP_YDISTANCE, 320); // Moved down to fit rows
+   ObjectSetInteger(0, btnName, OBJPROP_YDISTANCE, 340); // Moved down to fit rows
    ObjectSetInteger(0, btnName, OBJPROP_XSIZE, panelWidth - (margin * 2));
    ObjectSetInteger(0, btnName, OBJPROP_YSIZE, 32);
    ObjectSetInteger(0, btnName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, btnName, OBJPROP_FONTSIZE, 9);
+   ObjectSetString(0, btnName, OBJPROP_TEXT, "EA STATUS: ACTIVE");
    ObjectSetString(0, btnName, OBJPROP_FONT, "Segoe UI Semibold");
    ObjectSetInteger(0, btnName, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, btnName, OBJPROP_HIDDEN, true);
@@ -365,6 +370,7 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
       ObjectSetString(0, "DbATR",       OBJPROP_TEXT, "still be managed safely.");
       ObjectSetString(0, "DbMode",      OBJPROP_TEXT, "");
       ObjectSetString(0, "DbSL",        OBJPROP_TEXT, "");
+      ObjectSetString(0, "DbBias",      OBJPROP_TEXT, "");
       ObjectSetString(0, "DbDecision",  OBJPROP_TEXT, "");
       ObjectSetString(0, "DbConviction",OBJPROP_TEXT, "");
       ObjectSetString(0, "DbReason",    OBJPROP_TEXT, "");
@@ -390,24 +396,17 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
    ObjectSetString(0, "DbMode",      OBJPROP_TEXT, "Active Mode     : " + modeStr);
    ObjectSetString(0, "DbSL",        OBJPROP_TEXT, StringFormat("Stop Loss (ATR) : %.2f $", g_stopLossDist));
    
-   // AI Dashboard outputs
+   // AI Daily Bias
+   ObjectSetString(0, "DbBias",      OBJPROP_TEXT, "AI Daily Bias   : " + g_dailySentiment);
+   if(g_dailySentiment == "BUY_ONLY")
+      ObjectSetInteger(0, "DbBias", OBJPROP_COLOR, C'76,175,80');  // Green
+   else if(g_dailySentiment == "SELL_ONLY")
+      ObjectSetInteger(0, "DbBias", OBJPROP_COLOR, C'239,83,80'); // Red
+   else
+      ObjectSetInteger(0, "DbBias", OBJPROP_COLOR, C'255,179,0'); // Yellow
+   
+   // AI Decision
    ObjectSetString(0, "DbDecision",  OBJPROP_TEXT, "AI Decision     : " + g_aiDecision);
-   
-   string convictionStr = (g_aiDecision == "LOCAL RULES" || g_aiDecision == "WAITING") ? "N/A" : StringFormat("%d%%", g_aiConviction);
-   if(g_aiConviction >= 80) convictionStr += " (HIGH CONFIDENCE)";
-   else if(g_aiConviction >= 50) convictionStr += " (MEDIUM CONFIDENCE)";
-   else if(g_aiConviction > 0) convictionStr += " (LOW CONFIDENCE - BLOCKED)";
-   ObjectSetString(0, "DbConviction", OBJPROP_TEXT, "AI Conviction   : " + convictionStr);
-   
-   // Handle text wrapping for Reason (truncate if longer than 32 chars)
-   string cleanReason = g_aiReason;
-   if(StringLen(cleanReason) > 32)
-   {
-      cleanReason = StringSubstr(cleanReason, 0, 29) + "...";
-   }
-   ObjectSetString(0, "DbReason",    OBJPROP_TEXT, "AI Reason       : " + cleanReason);
-   
-   // Color coding for AI Decision
    if(StringFind(g_aiDecision, "BUY") >= 0)
       ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, C'76,175,80');  // Green
    else if(StringFind(g_aiDecision, "SELL") >= 0)
@@ -416,8 +415,14 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
       ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, C'255,179,0'); // Yellow
    else
       ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, clrWhite);
-      
-   // Color coding for AI Conviction
+   
+   // AI Conviction
+   string convictionStr = (g_aiDecision == "LOCAL RULES" || g_aiDecision == "WAITING") ? "N/A" : StringFormat("%d%%", g_aiConviction);
+   if(g_aiConviction >= 80) convictionStr += " (HIGH CONFIDENCE)";
+   else if(g_aiConviction >= 50) convictionStr += " (MEDIUM CONFIDENCE)";
+   else if(g_aiConviction > 0) convictionStr += " (LOW CONFIDENCE - BLOCKED)";
+   ObjectSetString(0, "DbConviction", OBJPROP_TEXT, "AI Conviction   : " + convictionStr);
+   
    if(g_aiDecision == "LOCAL RULES" || g_aiDecision == "WAITING")
       ObjectSetInteger(0, "DbConviction", OBJPROP_COLOR, clrWhite);
    else if(g_aiConviction >= 80)
@@ -426,7 +431,15 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
       ObjectSetInteger(0, "DbConviction", OBJPROP_COLOR, C'255,179,0'); // Yellow
    else
       ObjectSetInteger(0, "DbConviction", OBJPROP_COLOR, C'239,83,80'); // Red
-      
+   
+   // AI Reason (truncated at 32 chars to fit panel nicely)
+   string cleanReason = g_aiReason;
+   if(StringLen(cleanReason) > 32)
+   {
+      cleanReason = StringSubstr(cleanReason, 0, 29) + "...";
+   }
+   ObjectSetString(0, "DbReason",    OBJPROP_TEXT, "AI Reason       : " + cleanReason);
+   
    // Highlight Active Mode Color
    if(reversionModeActive)
       ObjectSetInteger(0, "DbMode", OBJPROP_COLOR, C'255,179,0'); 
@@ -774,6 +787,158 @@ void ManageCandleCloseLossCutting()
 }
 
 //+------------------------------------------------------------------+
+//| Simple string parsing helper to extract value by key from JSON   |
+//+------------------------------------------------------------------+
+string ExtractJSONValue(string json, string key)
+{
+   string searchKey = "\"" + key + "\"";
+   int startIdx = StringFind(json, searchKey);
+   if(startIdx < 0) return "";
+   
+   int colonIdx = StringFind(json, ":", startIdx + StringLen(searchKey));
+   if(colonIdx < 0) return "";
+   
+   int valStart = colonIdx + 1;
+   while(valStart < StringLen(json) && 
+         (StringSubstr(json, valStart, 1) == " " || 
+          StringSubstr(json, valStart, 1) == "\t" || 
+          StringSubstr(json, valStart, 1) == "\r" || 
+          StringSubstr(json, valStart, 1) == "\n" || 
+          StringSubstr(json, valStart, 1) == "\"" ||
+          StringSubstr(json, valStart, 1) == "'"))
+   {
+      valStart++;
+   }
+   
+   int valEnd = valStart;
+   while(valEnd < StringLen(json))
+   {
+      string charStr = StringSubstr(json, valEnd, 1);
+      if(charStr == "\"" || charStr == "'" || charStr == "," || charStr == "}" || charStr == "\r" || charStr == "\n")
+      {
+         break;
+      }
+      valEnd++;
+   }
+   
+   if(valEnd > valStart)
+   {
+      return StringSubstr(json, valStart, valEnd - valStart);
+   }
+   return "";
+}
+
+//+------------------------------------------------------------------+
+//| Central AI client caller with automatic failover (Gemini->Groq)   |
+//+------------------------------------------------------------------+
+bool CallAI(string prompt, string &responseText)
+{
+   // 1. Try Gemini first
+   if(InpGeminiAPIKey != "" && InpGeminiAPIKey != "PASTE_YOUR_API_KEY_HERE")
+   {
+      string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
+      string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + InpGeminiAPIKey;
+      string headers = "Content-Type: application/json\r\n";
+      
+      char post[];
+      char result[];
+      string responseHeaders = "";
+      int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+      if(bytes > 0 && post[bytes-1] == 0)
+      {
+         ArrayResize(post, bytes - 1);
+      }
+      
+      ResetLastError();
+      int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
+      if(res == 200)
+      {
+         responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+         return true;
+      }
+      else
+      {
+         string err = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+         Print("[Gemini Fail] HTTP Status: ", res, ", Error Response: ", err);
+      }
+   }
+   
+   // 2. Failover to Groq (Llama-3.1-8B-Instant)
+   if(InpGroqAPIKey != "" && InpGroqAPIKey != "PASTE_YOUR_API_KEY_HERE")
+   {
+      string cleanPrompt = prompt;
+      StringReplace(cleanPrompt, "\"", "\\\"");
+      string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + cleanPrompt + "\"}],\"temperature\":0.2}";
+      string url = "https://api.groq.com/openai/v1/chat/completions";
+      string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpGroqAPIKey + "\r\n";
+      
+      char post[];
+      char result[];
+      string responseHeaders = "";
+      int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+      if(bytes > 0 && post[bytes-1] == 0)
+      {
+         ArrayResize(post, bytes - 1);
+      }
+      
+      ResetLastError();
+      int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
+      if(res == 200)
+      {
+         responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+         return true;
+      }
+      else
+      {
+         string err = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+         Print("[Groq Fail] HTTP Status: ", res, ", Error Response: ", err);
+      }
+   }
+   
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Query AI for Daily Sentiment Directional Anchor                  |
+//+------------------------------------------------------------------+
+bool QueryAIDailySentiment()
+{
+   string dailyHistory = "";
+   for(int i = 3; i >= 1; i--)
+   {
+      dailyHistory += StringFormat("[D1 Bar %d: O=%.2f, H=%.2f, L=%.2f, C=%.2f] ", 
+         i, iOpen(_Symbol, PERIOD_D1, i), iHigh(_Symbol, PERIOD_D1, i), iLow(_Symbol, PERIOD_D1, i), iClose(_Symbol, PERIOD_D1, i));
+   }
+   
+   string prompt = StringFormat(
+      "Gold (XAUUSD) Daily Bias Analysis. Current price=%.2f. Daily candles history: %s. "+
+      "As a professional macro analyst, determine today's directional bias. "+
+      "Respond strictly with a JSON object containing: 'bias' ('BUY_ONLY', 'SELL_ONLY', or 'BI_DIRECTIONAL') and 'reason' (short 10 words). "+
+      "Example output format: { 'bias': 'BUY_ONLY', 'reason': 'Strong daily bullish engulfing' }.",
+      SymbolInfoDouble(_Symbol, SYMBOL_BID), dailyHistory
+   );
+   
+   string responseText = "";
+   if(!CallAI(prompt, responseText))
+   {
+      g_dailySentiment = "BI_DIRECTIONAL";
+      g_dailySentimentReason = "AI offline, trading both sides.";
+      return false;
+   }
+   
+   string rawBias = ExtractJSONValue(responseText, "bias");
+   string rawReason = ExtractJSONValue(responseText, "reason");
+   
+   if(StringFind(rawBias, "BUY_ONLY") >= 0) g_dailySentiment = "BUY_ONLY";
+   else if(StringFind(rawBias, "SELL_ONLY") >= 0) g_dailySentiment = "SELL_ONLY";
+   else g_dailySentiment = "BI_DIRECTIONAL";
+   
+   g_dailySentimentReason = (rawReason != "") ? rawReason : "Daily bias analyzed.";
+   Print("[AI Bias] Daily Sentiment set to: ", g_dailySentiment, " (Reason: ", g_dailySentimentReason, ")");
+   return true;
+}
+
+//+------------------------------------------------------------------+
 //| Function to manage active positions (BE, Trailing, Time-Decay)   |
 //+------------------------------------------------------------------+
 void ManageActivePositions()
@@ -880,194 +1045,88 @@ void ManageActivePositions()
 }
 
 //+------------------------------------------------------------------+
-//| Simple string parsing helper to extract value by key from JSON   |
+//| Query AI for Active Trade Management (Dynamic Trailing Stop)     |
 //+------------------------------------------------------------------+
-string ExtractJSONValue(string json, string key)
+void QueryAIActiveTradeManagement()
 {
-   string searchKey = "\"" + key + "\"";
-   int startIdx = StringFind(json, searchKey);
-   if(startIdx < 0) return "";
+   double stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
-   int colonIdx = StringFind(json, ":", startIdx + StringLen(searchKey));
-   if(colonIdx < 0) return "";
-   
-   int valStart = colonIdx + 1;
-   while(valStart < StringLen(json) && 
-         (StringSubstr(json, valStart, 1) == " " || 
-          StringSubstr(json, valStart, 1) == "\t" || 
-          StringSubstr(json, valStart, 1) == "\r" || 
-          StringSubstr(json, valStart, 1) == "\n" || 
-          StringSubstr(json, valStart, 1) == "\"" ||
-          StringSubstr(json, valStart, 1) == "'"))
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
-      valStart++;
-   }
-   
-   int valEnd = valStart;
-   while(valEnd < StringLen(json))
-   {
-      string charStr = StringSubstr(json, valEnd, 1);
-      if(charStr == "\"" || charStr == "'" || charStr == "," || charStr == "}" || charStr == "\r" || charStr == "\n")
+      if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
       {
-         break;
+         ulong ticket = PositionGetInteger(POSITION_TICKET);
+         ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+         double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+         double currentSL = PositionGetDouble(POSITION_SL);
+         double currentTP = PositionGetDouble(POSITION_TP);
+         double currentPrice = (type == POSITION_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+         double currentProfit = (type == POSITION_TYPE_BUY) ? (currentPrice - entryPrice) : (entryPrice - currentPrice);
+         
+         // Gather recent 3 bars history for trend context
+         string barsHistory = "";
+         for(int j = 3; j >= 1; j--)
+         {
+            barsHistory += StringFormat("[Bar %d: O=%.2f, H=%.2f, L=%.2f, C=%.2f] ", 
+               j, iOpen(_Symbol, _Period, j), iHigh(_Symbol, _Period, j), iLow(_Symbol, _Period, j), iClose(_Symbol, _Period, j));
+         }
+         
+         string prompt = StringFormat(
+            "Gold (XAUUSD) active position management review. Type=%s, EntryPrice=%.2f, CurrentPrice=%.2f, CurrentSL=%.2f, CurrentProfit=%.2f. "+
+            "Recent 3 M1 candles: %s. "+
+            "Evaluate position exit/trail. Respond strictly with a JSON object containing: 'action' ('HOLD', 'TIGHTEN', 'WIDEN', or 'CLOSE'), 'stop_distance' (double dollar offset from current price, e.g. 0.70), and 'reason' (short 10 words). "+
+            "Example format: { 'action': 'TIGHTEN', 'stop_distance': 0.60, 'reason': 'Bearish trend forming close' }.",
+            (type == POSITION_TYPE_BUY ? "BUY" : "SELL"), entryPrice, currentPrice, currentSL, currentProfit, barsHistory
+         );
+         
+         string responseText = "";
+         if(CallAI(prompt, responseText))
+         {
+            string rawAction = ExtractJSONValue(responseText, "action");
+            double stopDistance = StringToDouble(ExtractJSONValue(responseText, "stop_distance"));
+            string rawReason = ExtractJSONValue(responseText, "reason");
+            
+            if(rawReason != "") g_aiReason = "Trade Mgmt: " + rawReason;
+            
+            if(rawAction == "CLOSE")
+            {
+               Print(StringFormat("[AI Dynamic Exit] Closing trade #%I64u. Reason: %s", ticket, rawReason));
+               trade.PositionClose(ticket);
+               continue;
+            }
+            else if((rawAction == "TIGHTEN" || rawAction == "WIDEN") && stopDistance > 0.0)
+            {
+               double targetSL = 0.0;
+               if(type == POSITION_TYPE_BUY)
+               {
+                  targetSL = NormalizeDouble(currentPrice - stopDistance, _Digits);
+                  // Ensure we only move SL in profit direction (trailing stop rules)
+                  if(targetSL > currentSL || currentSL == 0.0)
+                  {
+                     if(currentPrice - targetSL >= stopsLevel)
+                     {
+                        trade.PositionModify(ticket, targetSL, currentTP);
+                        Print(StringFormat("[AI Dynamic SL] Modified BUY #%I64u SL to %.2f (offset %.2f). Reason: %s", ticket, targetSL, stopDistance, rawReason));
+                     }
+                  }
+               }
+               else if(type == POSITION_TYPE_SELL)
+               {
+                  targetSL = NormalizeDouble(currentPrice + stopDistance, _Digits);
+                  // Ensure we only move SL in profit direction (trailing stop rules)
+                  if(targetSL < currentSL || currentSL == 0.0)
+                  {
+                     if(targetSL - currentPrice >= stopsLevel)
+                     {
+                        trade.PositionModify(ticket, targetSL, currentTP);
+                        Print(StringFormat("[AI Dynamic SL] Modified SELL #%I64u SL to %.2f (offset %.2f). Reason: %s", ticket, targetSL, stopDistance, rawReason));
+                     }
+                  }
+               }
+            }
+         }
       }
-      valEnd++;
    }
-   
-   if(valEnd > valStart)
-   {
-      return StringSubstr(json, valStart, valEnd - valStart);
-   }
-   return "";
-}
-
-//+------------------------------------------------------------------+
-//| Query Google Gemini for market direction and conviction score    |
-//+------------------------------------------------------------------+
-bool QueryGeminiConvictionEngine(double adx, double atr, double rsi, double ema)
-{
-   if(InpGeminiAPIKey == "" || InpGeminiAPIKey == "PASTE_YOUR_API_KEY_HERE")
-   {
-      return false;
-   }
-   
-   // Gather candle history for smart price action reading (last 5 candles)
-   string priceHistory = "";
-   for(int i = 5; i >= 1; i--)
-   {
-      priceHistory += StringFormat("[Bar %d: O=%.2f, H=%.2f, L=%.2f, C=%.2f, V=%I64d] ", 
-         i, iOpen(_Symbol, _Period, i), iHigh(_Symbol, _Period, i), iLow(_Symbol, _Period, i), iClose(_Symbol, _Period, i), iVolume(_Symbol, _Period, i));
-   }
-   
-   double prevClose = iClose(_Symbol, _Period, 1);
-   
-   // Formulate prompt
-   string prompt = StringFormat(
-      "Gold (XAUUSD) M1 setup analysis. Spread=%.2f. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f. "+
-      "Price History: %s. "+
-      "As a professional quant, determine the highest probability direction. "+
-      "Respond strictly with a JSON object containing: 'decision' (BUY, SELL, or HOLD), 'conviction' (integer confidence score 0 to 100), and 'reason' (short 10-word summary). "+
-      "Example output format: { 'decision': 'BUY', 'conviction': 85, 'reason': 'Strong momentum cross' }.",
-      GetSmoothedSpread(), prevClose, adx, atr, rsi, ema, priceHistory
-   );
-   
-   string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
-   string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + InpGeminiAPIKey;
-   string headers = "Content-Type: application/json\r\n";
-   
-   char post[];
-   char result[];
-   string responseHeaders = "";
-   int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
-   if(bytes > 0 && post[bytes-1] == 0)
-   {
-      ArrayResize(post, bytes - 1);
-   }
-   
-   ResetLastError();
-   int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
-   
-   if(res != 200)
-   {
-      string errorResponse = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-      Print("[Gemini API Error] HTTP Response: ", res, ", Response: ", errorResponse);
-      return false;
-   }
-   
-   string responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-   
-   string rawDecision = ExtractJSONValue(responseText, "decision");
-   string rawConviction = ExtractJSONValue(responseText, "conviction");
-   string rawReason = ExtractJSONValue(responseText, "reason");
-   
-   if(StringFind(rawDecision, "BUY") >= 0) g_aiDecision = "BUY (Gemini)";
-   else if(StringFind(rawDecision, "SELL") >= 0) g_aiDecision = "SELL (Gemini)";
-   else if(StringFind(rawDecision, "HOLD") >= 0) g_aiDecision = "HOLD (Gemini)";
-   else g_aiDecision = "HOLD (Gemini)";
-   
-   g_aiConviction = (int)StringToInteger(rawConviction);
-   if(g_aiConviction < 0) g_aiConviction = 0;
-   if(g_aiConviction > 100) g_aiConviction = 100;
-   
-   g_aiReason = (rawReason != "") ? rawReason : "Gemini analyzed successfully.";
-   
-   return true;
-}
-
-//+------------------------------------------------------------------+
-//| Query Groq Llama-3.1 API for market direction & conviction score |
-//+------------------------------------------------------------------+
-bool QueryGroqConvictionEngine(double adx, double atr, double rsi, double ema)
-{
-   if(InpGroqAPIKey == "" || InpGroqAPIKey == "PASTE_YOUR_API_KEY_HERE")
-   {
-      return false;
-   }
-   
-   // Gather candle history for smart price action reading (last 5 candles)
-   string priceHistory = "";
-   for(int i = 5; i >= 1; i--)
-   {
-      priceHistory += StringFormat("[Bar %d: O=%.2f, H=%.2f, L=%.2f, C=%.2f, V=%I64d] ", 
-         i, iOpen(_Symbol, _Period, i), iHigh(_Symbol, _Period, i), iLow(_Symbol, _Period, i), iClose(_Symbol, _Period, i), iVolume(_Symbol, _Period, i));
-   }
-   
-   double prevClose = iClose(_Symbol, _Period, 1);
-   
-   // Formulate prompt
-   string prompt = StringFormat(
-      "Gold (XAUUSD) M1 setup analysis. Spread=%.2f. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f. "+
-      "Price History: %s. "+
-      "As a professional quant, determine the highest probability direction. "+
-      "Respond strictly with a JSON object containing: 'decision' (BUY, SELL, or HOLD), 'conviction' (integer confidence score 0 to 100), and 'reason' (short 10-word summary). "+
-      "Example output format: { 'decision': 'BUY', 'conviction': 85, 'reason': 'Strong momentum cross' }.",
-      GetSmoothedSpread(), prevClose, adx, atr, rsi, ema, priceHistory
-   );
-   
-   string cleanPrompt = prompt;
-   StringReplace(cleanPrompt, "\"", "\\\"");
-   
-   string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + cleanPrompt + "\"}],\"temperature\":0.2}";
-   string url = "https://api.groq.com/openai/v1/chat/completions";
-   string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpGroqAPIKey + "\r\n";
-   
-   char post[];
-   char result[];
-   string responseHeaders = "";
-   int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
-   if(bytes > 0 && post[bytes-1] == 0)
-   {
-      ArrayResize(post, bytes - 1);
-   }
-   
-   ResetLastError();
-   int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
-   
-   if(res != 200)
-   {
-      string errorResponse = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-      Print("[Groq API Error] HTTP Response: ", res, ", Response: ", errorResponse);
-      return false;
-   }
-   
-   string responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-   
-   string rawDecision = ExtractJSONValue(responseText, "decision");
-   string rawConviction = ExtractJSONValue(responseText, "conviction");
-   string rawReason = ExtractJSONValue(responseText, "reason");
-   
-   if(StringFind(rawDecision, "BUY") >= 0) g_aiDecision = "BUY (Groq)";
-   else if(StringFind(rawDecision, "SELL") >= 0) g_aiDecision = "SELL (Groq)";
-   else if(StringFind(rawDecision, "HOLD") >= 0) g_aiDecision = "HOLD (Groq)";
-   else g_aiDecision = "HOLD (Groq)";
-   
-   g_aiConviction = (int)StringToInteger(rawConviction);
-   if(g_aiConviction < 0) g_aiConviction = 0;
-   if(g_aiConviction > 100) g_aiConviction = 100;
-   
-   g_aiReason = (rawReason != "") ? rawReason : "Groq analyzed successfully.";
-   
-   return true;
 }
 
 //+------------------------------------------------------------------+
@@ -1136,35 +1195,54 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       isMomentumHour = true;
    }
 
-   bool useReversionMode = false;
-   if(InpEnableHybridMode)
+   // --- Query the AI Conviction Engine ---
+   string barsHistory = "";
+   for(int i = 5; i >= 1; i--)
    {
-      if(InpUseSessionHours && !isMomentumHour)
-      {
-         useReversionMode = true;
-         if(isVolatilitySpike)
-         {
-            useReversionMode = false;
-         }
-      }
-      else if(currentADX < g_minADX)
-      {
-         useReversionMode = true;
-      }
+      barsHistory += StringFormat("[Bar %d: O=%.2f, H=%.2f, L=%.2f, C=%.2f, V=%I64d] ", 
+         i, iOpen(_Symbol, _Period, i), iHigh(_Symbol, _Period, i), iLow(_Symbol, _Period, i), iClose(_Symbol, _Period, i), iVolume(_Symbol, _Period, i));
    }
+   
+   string prompt = StringFormat(
+      "Gold (XAUUSD) setup analysis. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f. "+
+      "Price History: %s. "+
+      "As a professional quant, evaluate market regime (sideways limits vs breakout trend) and directional strength. "+
+      "Respond strictly with a JSON object containing: 'decision' ('BUY', 'SELL', or 'HOLD'), 'conviction' (integer 0 to 100), 'regime' ('BREAKOUT' or 'REVERSION'), and 'reason' (short 10 words). "+
+      "Example output: { 'decision': 'BUY', 'conviction': 85, 'regime': 'BREAKOUT', 'reason': 'Momentum breaking high' }.",
+      prevClose, currentADX, currentATR, currentRSI, currentEMA, barsHistory
+   );
 
-   // --- Query the AI Conviction Engine with Failover ---
    bool aiActive = false;
+   string responseText = "";
+   string rawRegime = "BREAKOUT"; // default
+   
    if(InpUseGeminiAI)
    {
-      // Try Gemini first
-      aiActive = QueryGeminiConvictionEngine(currentADX, currentATR, currentRSI, currentEMA);
-      
-      // Fallback/Failover to Groq if Gemini failed
-      if(!aiActive && InpGroqAPIKey != "" && InpGroqAPIKey != "PASTE_YOUR_API_KEY_HERE")
+      aiActive = CallAI(prompt, responseText);
+      if(aiActive)
       {
-         Print("[AI Failover] Gemini API unavailable. Switching to Groq Llama-3.1...");
-         aiActive = QueryGroqConvictionEngine(currentADX, currentATR, currentRSI, currentEMA);
+         string rawDecision = ExtractJSONValue(responseText, "decision");
+         string rawConviction = ExtractJSONValue(responseText, "conviction");
+         string rawReason = ExtractJSONValue(responseText, "reason");
+         rawRegime = ExtractJSONValue(responseText, "regime");
+         
+         // Clean decision
+         if(StringFind(rawDecision, "BUY") >= 0) g_aiDecision = "BUY";
+         else if(StringFind(rawDecision, "SELL") >= 0) g_aiDecision = "SELL";
+         else if(StringFind(rawDecision, "HOLD") >= 0) g_aiDecision = "HOLD";
+         else g_aiDecision = "HOLD";
+         
+         g_aiConviction = (int)StringToInteger(rawConviction);
+         if(g_aiConviction < 0) g_aiConviction = 0;
+         if(g_aiConviction > 100) g_aiConviction = 100;
+         
+         g_aiReason = (rawReason != "") ? rawReason : "AI analyzed successfully.";
+      }
+      else
+      {
+         g_aiDecision = "API ERROR";
+         g_aiConviction = 0;
+         g_aiReason = "AI services offline.";
       }
    }
    else
@@ -1187,7 +1265,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          Print(StringFormat("[Conviction Engine Blocked] Score %d is below the minimum threshold %d. Reason: %s", 
             g_aiConviction, InpMinConviction, g_aiReason));
          g_aiDecision = "BLOCKED";
-         DrawChartStatus(currentADX, currentATR, useReversionMode);
+         DrawChartStatus(currentADX, currentATR, (rawRegime == "REVERSION"));
          return false; 
       }
       
@@ -1204,14 +1282,40 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    if(finalLotSize < minLot) finalLotSize = minLot;
 
-   // Place Orders
+   // --- Determine Entry Mode (AI Regime Switch or local ADX fallback) ---
+   bool useReversionMode = false;
+   if(InpEnableHybridMode)
+   {
+      if(aiActive)
+      {
+         useReversionMode = (rawRegime == "REVERSION");
+      }
+      else
+      {
+         // Fallback to local indicators
+         if(InpUseSessionHours && !isMomentumHour)
+         {
+            useReversionMode = true;
+            if(isVolatilitySpike)
+            {
+               useReversionMode = false;
+            }
+         }
+         else if(currentADX < g_minADX)
+         {
+            useReversionMode = true;
+         }
+      }
+   }
+
+   // Place Orders in accordance with Daily Sentiment Anchor
    if(useReversionMode)
    {
       // --- SIDEWAYS RANGE MODE (Limit Orders) ---
       double reversionOffset = (InpTimeframeMode == TF_M1 || (InpTimeframeMode == TF_AUTO && _Period == PERIOD_M1)) ? 0.08 : 0.15;
       
-      bool placeBuy = (!aiActive || StringFind(g_aiDecision, "BUY") >= 0);
-      bool placeSell = (!aiActive || StringFind(g_aiDecision, "SELL") >= 0);
+      bool placeBuy = (g_dailySentiment != "SELL_ONLY") && (!aiActive || StringFind(g_aiDecision, "BUY") >= 0);
+      bool placeSell = (g_dailySentiment != "BUY_ONLY") && (!aiActive || StringFind(g_aiDecision, "SELL") >= 0);
       
       if(placeBuy)
       {
@@ -1248,20 +1352,20 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          if(prevVolume < avgVolume) return false;
       }
 
-      bool allowBuy = true;
-      bool allowSell = true;
+      bool allowBuy = (g_dailySentiment != "SELL_ONLY");
+      bool allowSell = (g_dailySentiment != "BUY_ONLY");
       
       if(aiActive)
       {
-         allowBuy  = (StringFind(g_aiDecision, "BUY") >= 0);
-         allowSell = (StringFind(g_aiDecision, "SELL") >= 0);
+         allowBuy  = allowBuy && (StringFind(g_aiDecision, "BUY") >= 0);
+         allowSell = allowSell && (StringFind(g_aiDecision, "SELL") >= 0);
       }
       else
       {
          if(InpUseEMAFilter)
          {
-            allowBuy = (prevClose > currentEMA);
-            allowSell = (prevClose < currentEMA);
+            allowBuy = allowBuy && (prevClose > currentEMA);
+            allowSell = allowSell && (prevClose < currentEMA);
          }
          
          if(InpUseMTFTrendFilter)
@@ -1326,6 +1430,8 @@ void TestAIEngines()
    if(InpGeminiAPIKey != "" && InpGeminiAPIKey != "PASTE_YOUR_API_KEY_HERE")
    {
       string prompt = "Respond strictly with the single word: OK";
+      string responseText = "";
+      
       string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
       string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + InpGeminiAPIKey;
       string headers = "Content-Type: application/json\r\n";
@@ -1334,14 +1440,10 @@ void TestAIEngines()
       char result[];
       string responseHeaders = "";
       int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
-      if(bytes > 0 && post[bytes-1] == 0)
-      {
-         ArrayResize(post, bytes - 1);
-      }
+      if(bytes > 0 && post[bytes-1] == 0) ArrayResize(post, bytes - 1);
       
       ResetLastError();
       int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
-      
       if(res == 200)
       {
          Print("[Gemini API Diagnostic] Connection successful!");
@@ -1358,6 +1460,8 @@ void TestAIEngines()
    if(InpGroqAPIKey != "" && InpGroqAPIKey != "PASTE_YOUR_API_KEY_HERE")
    {
       string prompt = "Respond strictly with the word OK";
+      string responseText = "";
+      
       string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + prompt + "\"}],\"temperature\":0.2}";
       string url = "https://api.groq.com/openai/v1/chat/completions";
       string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpGroqAPIKey + "\r\n";
@@ -1366,14 +1470,10 @@ void TestAIEngines()
       char result[];
       string responseHeaders = "";
       int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
-      if(bytes > 0 && post[bytes-1] == 0)
-      {
-         ArrayResize(post, bytes - 1);
-      }
+      if(bytes > 0 && post[bytes-1] == 0) ArrayResize(post, bytes - 1);
       
       ResetLastError();
       int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
-      
       if(res == 200)
       {
          Print("[Groq API Diagnostic] Connection successful!");
@@ -1412,6 +1512,7 @@ int OnInit()
    trade.SetExpertMagicNumber(InpMagicNumber);
    g_lastBarTime = 0;
    g_lastOrderPlacedBarTime = 0;
+   g_lastDay = 0;
    g_spreadCount = 0;
    ArrayInitialize(g_spreadBuffer, 0.0);
    
@@ -1438,6 +1539,13 @@ int OnInit()
    // 4. Test AI Engines connection live on startup
    TestAIEngines();
    
+   // 5. Establish initial Daily Sentiment Anchor
+   QueryAIDailySentiment();
+   
+   MqlDateTime dt;
+   TimeCurrent(dt);
+   g_lastDay = dt.day;
+   
    return(INIT_SUCCEEDED);
 }
 
@@ -1462,6 +1570,7 @@ void OnDeinit(const int reason)
    ObjectDelete(0, "DbATR");
    ObjectDelete(0, "DbMode");
    ObjectDelete(0, "DbSL");
+   ObjectDelete(0, "DbBias");
    ObjectDelete(0, "DbDecision");
    ObjectDelete(0, "DbConviction");
    ObjectDelete(0, "DbReason");
@@ -1522,6 +1631,14 @@ void OnTick()
       
       MqlDateTime dt;
       TimeCurrent(dt);
+      
+      // Update Daily Sentiment Anchor on new calendar day
+      if(dt.day != g_lastDay)
+      {
+         g_lastDay = dt.day;
+         QueryAIDailySentiment();
+      }
+      
       bool isMomentumHour = false;
       if(dt.hour >= InpLondonStartHour && dt.hour < InpLondonEndHour)
       {
@@ -1583,6 +1700,12 @@ void OnTick()
       if(g_lastBarTime != 0)
       {
          ManageCandleCloseLossCutting();
+         
+         // Trigger AI active trade management dynamically on candle close
+         if(CountActiveTrades() > 0)
+         {
+            QueryAIActiveTradeManagement();
+         }
       }
       
       g_lastBarTime = currentBarTime;
