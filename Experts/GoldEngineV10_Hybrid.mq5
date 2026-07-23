@@ -24,7 +24,7 @@ input group "--- Target Timeframe Selection ---"
 input ENUM_TF_MODE InpTimeframeMode = TF_AUTO;    // Target Chart Timeframe Mode
 
 input group "--- Gemini AI Engine Settings ---"
-input string   InpGeminiAPIKey       = "";      // Gemini API Key (Get from aistudio.google.com)
+input string   InpGeminiAPIKey       = "AIzaSyB6PZqz_ck3sGIsr2XmBTK6Qo02zpkSt60"; // Gemini API Key (Get from aistudio.google.com)
 input bool     InpUseGeminiAI        = true;    // Use Gemini AI for Trade Decisions
 input int      InpMinConviction      = 50;      // Minimum AI Conviction to trade (0-100)
 
@@ -954,7 +954,7 @@ bool QueryGeminiConvictionEngine(double adx, double atr, double rsi, double ema)
    );
    
    string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
-   string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + InpGeminiAPIKey;
+   string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + InpGeminiAPIKey;
    string headers = "Content-Type: application/json\r\n";
    
    char post[];
@@ -1246,7 +1246,7 @@ void TestGeminiAPI()
    
    string prompt = "Respond strictly with the single word: OK";
    string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
-   string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + InpGeminiAPIKey;
+   string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + InpGeminiAPIKey;
    string headers = "Content-Type: application/json\r\n";
    
    char post[];
