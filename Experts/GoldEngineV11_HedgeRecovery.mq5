@@ -1083,7 +1083,8 @@ void ManageCandleCloseLossCutting(bool reversionModeActive)
          {
             if(g_hedgeActive) continue;
             string comment = PositionGetString(POSITION_COMMENT);
-            if(comment == "HEDGE_FREEZE" || comment == "RECOVERY_ENTRY") continue;
+             bool isSwingPosition = (comment == "GE_SWING");
+            if(comment == "HEDGE_FREEZE" || comment == "RECOVERY_ENTRY" || comment == "GE_SWING") continue;
             ulong ticket = PositionGetInteger(POSITION_TICKET);
             ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
             double currentSL = PositionGetDouble(POSITION_SL);
@@ -1096,14 +1097,14 @@ void ManageCandleCloseLossCutting(bool reversionModeActive)
             
             if(type == POSITION_TYPE_BUY)
             {
-               if(InpEnableRejectionExit && prevClose < prevOpen && !isSidewaysRegime && g_tradeHorizon != "LONG_TERM")
+               if(InpEnableRejectionExit && prevClose < prevOpen && !isSidewaysRegime && !isSwingPosition)
                {
                   Print(StringFormat("[V10 SOFT STOP] Closing BUY ticket #%I64u due to Bearish Close.", ticket));
                   trade.PositionClose(ticket);
                   continue;
                }
                
-               if(InpEnableCandleTrail && !isSidewaysRegime && g_tradeHorizon != "LONG_TERM")
+               if(InpEnableCandleTrail && !isSidewaysRegime && !isSwingPosition)
                {
                   double targetSL = NormalizeDouble(prevLow - g_candleTrailBuffer, _Digits);
                   if(targetSL > currentSL || currentSL == 0.0)
@@ -1121,14 +1122,14 @@ void ManageCandleCloseLossCutting(bool reversionModeActive)
             }
             else if(type == POSITION_TYPE_SELL)
             {
-               if(InpEnableRejectionExit && prevClose > prevOpen && !isSidewaysRegime && g_tradeHorizon != "LONG_TERM")
+               if(InpEnableRejectionExit && prevClose > prevOpen && !isSidewaysRegime && !isSwingPosition)
                {
                   Print(StringFormat("[V10 SOFT STOP] Closing SELL ticket #%I64u due to Bullish Close.", ticket));
                   trade.PositionClose(ticket);
                   continue;
                }
                
-               if(InpEnableCandleTrail && !isSidewaysRegime && g_tradeHorizon != "LONG_TERM")
+               if(InpEnableCandleTrail && !isSidewaysRegime && !isSwingPosition)
                {
                   double targetSL = NormalizeDouble(prevHigh + g_candleTrailBuffer, _Digits);
                   if(targetSL < currentSL || currentSL == 0.0)
@@ -1363,16 +1364,18 @@ void ManageActivePositions()
       if(PositionGetSymbol(i) == _Symbol)
       {
          if(PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
-         {
-            ulong ticket = PositionGetInteger(POSITION_TICKET);
-            ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+          {
+             string posComment = PositionGetString(POSITION_COMMENT);
+             bool isSwingPosition = (posComment == "GE_SWING");
+             ulong ticket = PositionGetInteger(POSITION_TICKET);
+             ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
             double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
             double currentSL = PositionGetDouble(POSITION_SL);
             double currentTP = PositionGetDouble(POSITION_TP);
             double currentVolume = PositionGetDouble(POSITION_VOLUME);
             datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
             
-            if(g_enableTimeDecay && g_tradeHorizon != "LONG_TERM")
+            if(g_enableTimeDecay && !isSwingPosition)
             {
                int durationSec = (int)(TimeCurrent() - openTime);
                if(durationSec >= g_maxHoldMinutes * 60)
@@ -1382,7 +1385,7 @@ void ManageActivePositions()
                }
             }
             
-            double mult = (g_tradeHorizon == "LONG_TERM") ? 2.0 : 1.0;
+            double mult = isSwingPosition ? 2.5 : 1.0;
             double actBETrigger     = g_beTrigger * mult;
             double actBEOffset      = g_beOffset * mult;
             double actStage1Trigger = g_stage1Trigger * mult;
@@ -2149,7 +2152,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       "Recent closed trades history: %s. "+
       "Untested Price Magnets (Liquidity Pools): %s. "+"ICT Market Structure (Order Blocks & Fair Value Gaps): %s. "+
       "As a professional self-correcting quant trader, analyze the macro trend, price history, candle patterns (like Hammer/Pin Bar wicks representing rejection at support/resistance floors), and GNN magnets. "+
-      "Instructions: 1. During strong trends (ADX > 25.0 and clear direction above/below EMA200/VWAP), you are highly encouraged to execute a LONG_TERM trade in the direction of the trend (e.g., using VOLUME_BREAKOUT or DONCHIAN_BREAKOUT) to capture a major multi-hour move (targeting 30-50+ points) with a wide Stop Loss. 2. If the price has deeply retraced to a macro GNN support floor (like Aqua lines) and you detect a bullish rejection (Hammers/long lower shadows), issue a LONG_TERM BUY swing trade targeting the Golden GNN resistance ceiling (50+ points above) with a wide Stop Loss below the support floor. 3. Conversely, if price has spiked to a Golden resistance ceiling and shows bearish rejection (Shooting Stars), issue a LONG_TERM SELL swing trade targeting the Aqua support floor. 4. LONG_TERM trades bypass all time decay exits and are intended to run for 4-5 hours to secure large trend gains, even with small lot sizes. 5. CRITICAL: Do NOT execute SELL trades when the price is close to (within 5 points of) an untested GNN Support floor (Aqua line), and do NOT execute BUY trades when the price is close to (within 5 points of) an untested GNN Resistance ceiling (Golden line). Selling the support floor or buying the resistance ceiling leads to instant losses on pullbacks. Wait for a breakout or trade the bounce. Identify wick rejections and adjust your decision or stop loss buffer to let wicks breathe. 7. RANGE FLUX PATIENCE: When price is oscillating inside the GNN Golden/Aqua channel, be patient. Bounces are normal. The system automatically bypasses soft-stops inside the channel and will execute a break-even escape (+$0.20) on pullbacks rather than taking range losses. 6. Under ICT Concepts: You are highly encouraged to buy when the price retraces to a Bullish Order Block, or sell when it rises to a Bearish Order Block. If a breakout leaves an FVG, you can choose to enter a limit order in the FVG zone rather than buying the top or selling the bottom. "+
+      "Instructions: 1. You are highly encouraged to swing-trade using LONG_TERM horizon when you see daily trend direction or wick rejections at key levels, as it uses 70% smaller lots and wide SL/TP to run for hours. 2. During strong trends (ADX > 25.0 and clear direction above/below EMA200/VWAP), you are highly encouraged to execute a LONG_TERM trade in the direction of the trend (e.g., using VOLUME_BREAKOUT or DONCHIAN_BREAKOUT) to capture a major multi-hour move (targeting 30-50+ points) with a wide Stop Loss. 2. If the price has deeply retraced to a macro GNN support floor (like Aqua lines) and you detect a bullish rejection (Hammers/long lower shadows), issue a LONG_TERM BUY swing trade targeting the Golden GNN resistance ceiling (50+ points above) with a wide Stop Loss below the support floor. 3. Conversely, if price has spiked to a Golden resistance ceiling and shows bearish rejection (Shooting Stars), issue a LONG_TERM SELL swing trade targeting the Aqua support floor. 4. LONG_TERM trades bypass all time decay exits and are intended to run for 4-5 hours to secure large trend gains, even with small lot sizes. 5. CRITICAL: Do NOT execute SELL trades when the price is close to (within 5 points of) an untested GNN Support floor (Aqua line), and do NOT execute BUY trades when the price is close to (within 5 points of) an untested GNN Resistance ceiling (Golden line). Selling the support floor or buying the resistance ceiling leads to instant losses on pullbacks. Wait for a breakout or trade the bounce. Identify wick rejections and adjust your decision or stop loss buffer to let wicks breathe. 7. RANGE FLUX PATIENCE: When price is oscillating inside the GNN Golden/Aqua channel, be patient. Bounces are normal. The system automatically bypasses soft-stops inside the channel and will execute a break-even escape (+$0.20) on pullbacks rather than taking range losses. 6. Under ICT Concepts: You are highly encouraged to buy when the price retraces to a Bullish Order Block, or sell when it rises to a Bearish Order Block. If a breakout leaves an FVG, you can choose to enter a limit order in the FVG zone rather than buying the top or selling the bottom. "+
       "Respond strictly with a JSON object containing: "+
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
@@ -2273,6 +2276,46 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
     {
        structuralSL = StringToDouble(ExtractJSONValue(responseText, "stop_loss_price"));
        structuralTP = StringToDouble(ExtractJSONValue(responseText, "take_profit_price"));
+    }
+
+        // --- Swing / Long-Term Trade Execution ---
+    if(aiActive && g_tradeHorizon == "LONG_TERM")
+    {
+       double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+       double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+       
+       double swingSL = (structuralSL > 0.0) ? structuralSL : 0.0;
+       double swingTP = (structuralTP > 0.0) ? structuralTP : 0.0;
+       
+       if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+       {
+          if(swingSL == 0.0) swingSL = NormalizeDouble(currentBid - (2.5 * g_stopLossDist), _Digits);
+          if(swingTP == 0.0) swingTP = NormalizeDouble(currentBid + (4.0 * g_stopLossDist), _Digits);
+          
+          double swingLotSize = NormalizeDouble(finalLotSize * 0.30, 2);
+          double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+          if(swingLotSize < minLot) swingLotSize = minLot;
+          
+          PrintFormat("[Swing Engine] Placing LONG_TERM Swing BUY. Lot: %.2f, Entry: %.2f, SL: %.2f, TP: %.2f", 
+             swingLotSize, currentAsk, swingSL, swingTP);
+          trade.Buy(swingLotSize, _Symbol, currentAsk, swingSL, swingTP, "GE_SWING");
+          return true;
+       }
+       else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+       {
+          if(swingSL == 0.0) swingSL = NormalizeDouble(currentAsk + (2.5 * g_stopLossDist), _Digits);
+          if(swingTP == 0.0) swingTP = NormalizeDouble(currentAsk - (4.0 * g_stopLossDist), _Digits);
+          
+          double swingLotSize = NormalizeDouble(finalLotSize * 0.30, 2);
+          double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+          if(swingLotSize < minLot) swingLotSize = minLot;
+          
+          PrintFormat("[Swing Engine] Placing LONG_TERM Swing SELL. Lot: %.2f, Entry: %.2f, SL: %.2f, TP: %.2f", 
+             swingLotSize, currentBid, swingSL, swingTP);
+          trade.Sell(swingLotSize, _Symbol, currentBid, swingSL, swingTP, "GE_SWING");
+          return true;
+       }
+       return false;
     }
 
     // --- Execute Specific Strategy if Selected by AI ---
@@ -3163,6 +3206,7 @@ void ManageHedgeRecovery()
       if(PositionGetInteger(POSITION_MAGIC) == InpMagicNumber && PositionGetString(POSITION_SYMBOL) == _Symbol)
       {
          string comment = PositionGetString(POSITION_COMMENT);
+             bool isSwingPosition = (comment == "GE_SWING");
          if(comment == "HEDGE_FREEZE")
          {
             hedgeTicket = ticket;
@@ -3492,7 +3536,8 @@ void ManageSidewaysEscape(bool reversionModeActive)
       if(PositionGetInteger(POSITION_MAGIC) == InpMagicNumber && PositionGetString(POSITION_SYMBOL) == _Symbol)
       {
          string comment = PositionGetString(POSITION_COMMENT);
-         if(comment == "HEDGE_FREEZE" || comment == "RECOVERY_ENTRY") continue;
+             bool isSwingPosition = (comment == "GE_SWING");
+         if(comment == "HEDGE_FREEZE" || comment == "RECOVERY_ENTRY" || comment == "GE_SWING") continue;
          
          datetime posTime = (datetime)PositionGetInteger(POSITION_TIME);
          if(TimeCurrent() - posTime >= PeriodSeconds(_Period))
