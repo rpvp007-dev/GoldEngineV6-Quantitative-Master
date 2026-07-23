@@ -181,6 +181,7 @@ int            g_aiConviction = 0;
 string         g_aiReason = "Awaiting setup...";
 string         g_aiStrategy = "NONE";
 string         g_tradeHorizon = "SHORT_TERM"; // SHORT_TERM or LONG_TERM holding time horizon
+string         g_aiRegime = "BREAKOUT";     // Holds current active AI regime
 string         g_upcomingNews = "None"; // Holds parsed news for the current day
 datetime       g_lastCalendarFetchTime = 0; // Tracks when we last fetched calendar
 
@@ -195,6 +196,26 @@ ENUM_TIMEFRAMES GetHigherTimeframe()
    if(period == PERIOD_M15) return PERIOD_H4;
    if(period == PERIOD_H1)  return PERIOD_D1;
    return PERIOD_H4; // fallback
+}
+
+bool CalculateReversionMode(double adxVal, bool isMomHour, bool isVolSpike, bool aiAct, string rawReg)
+{
+   if(!InpEnableHybridMode) return false;
+   
+   if(adxVal < g_minADX) return true;
+   
+   if(InpUseSessionHours && !isMomHour)
+   {
+      if(isVolSpike) return false;
+      return true;
+   }
+   
+   if(aiAct)
+   {
+      return (rawReg == "REVERSION");
+   }
+   
+   return false;
 }
 
 //+------------------------------------------------------------------+
@@ -1780,6 +1801,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          string rawConviction = ExtractJSONValue(responseText, "conviction");
          string rawReason = ExtractJSONValue(responseText, "reason");
          rawRegime = ExtractJSONValue(responseText, "regime");
+          g_aiRegime = rawRegime;
          string rawStrategy = ExtractJSONValue(responseText, "strategy");
          
          // Clean decision
@@ -1816,29 +1838,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    g_lastOrderPlacedBarTime = currentBarTime;
 
    // --- Determine Entry Mode (Fallback / Standard AI regime switch) ---
-   bool useReversionMode = false;
-   if(InpEnableHybridMode)
-   {
-      if(currentADX < g_minADX)
-      {
-         useReversionMode = true;
-      }
-      else if(aiActive)
-      {
-         useReversionMode = (rawRegime == "REVERSION");
-      }
-      else
-      {
-         if(InpUseSessionHours && !isMomentumHour)
-         {
-            useReversionMode = true;
-            if(isVolatilitySpike)
-            {
-               useReversionMode = false;
-            }
-         }
-      }
-   }
+   g_aiRegime = rawRegime;
+   bool useReversionMode = CalculateReversionMode(currentADX, isMomentumHour, isVolatilitySpike, aiActive, g_aiRegime);
 
    // Dynamic Risk Scaling factor based on conviction
    double convictionMultiplier = 1.0;
@@ -2772,34 +2773,22 @@ void OnTick()
          isMomentumHour = true;
       }
       
-      if(InpEnableHybridMode)
+      double atrSum = 0.0;
+      int atrCount = 0;
+      for(int j = 2; j <= 11; j++)
       {
-         if(InpUseSessionHours && !isMomentumHour)
+         double atrTemp[];
+         ArraySetAsSeries(atrTemp, true);
+         if(CopyBuffer(g_atrHandle, 0, j, 1, atrTemp) > 0)
          {
-            useReversionMode = true;
-            double atrSum = 0.0;
-            int atrCount = 0;
-            for(int j = 2; j <= 11; j++)
-            {
-               double atrTemp[];
-               ArraySetAsSeries(atrTemp, true);
-               if(CopyBuffer(g_atrHandle, 0, j, 1, atrTemp) > 0)
-               {
-                  atrSum += atrTemp[0];
-                  atrCount++;
-               }
-            }
-            double avgATR = (atrCount > 0) ? (atrSum / atrCount) : currentATR;
-            if(avgATR > 0.0 && currentATR > 1.4 * avgATR)
-            {
-               useReversionMode = false;
-            }
-         }
-         else if(currentADX < g_minADX)
-         {
-            useReversionMode = true;
+            atrSum += atrTemp[0];
+            atrCount++;
          }
       }
+      double avgATR = (atrCount > 0) ? (atrSum / atrCount) : currentATR;
+      bool isVolatilitySpike = (avgATR > 0.0 && currentATR > 1.4 * avgATR);
+      bool aiActive = (g_dailySentiment != "WAITING");
+      useReversionMode = CalculateReversionMode(currentADX, isMomentumHour, isVolatilitySpike, aiActive, g_aiRegime);
    }
    
    // Keep dashboard drawn and updated on every tick
