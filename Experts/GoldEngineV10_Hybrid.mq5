@@ -2395,7 +2395,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
        if(placeBuy)
        {
           double buyLimitPrice = (ArraySize(nearestLows) > 0) ? nearestLows[0] : NormalizeDouble(prevLow - reversionOffset, _Digits);
-          double buySL          = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(buyLimitPrice - g_stopLossDist, _Digits);
+          double buySL          = (structuralSL > 0.0 && structuralSL < buyLimitPrice) ? structuralSL : NormalizeDouble(buyLimitPrice - g_stopLossDist, _Digits);
           double buyTP          = (ArraySize(nearestHighs) > 0) ? nearestHighs[0] : ((g_takeProfitDist > 0.0) ? NormalizeDouble(buyLimitPrice + g_takeProfitDist, _Digits) : 0.0);
           
           // Apply safety stops clamping
@@ -2416,7 +2416,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
        if(placeSell)
        {
           double sellLimitPrice = (ArraySize(nearestHighs) > 0) ? nearestHighs[0] : NormalizeDouble(prevHigh + reversionOffset, _Digits);
-          double sellSL         = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(sellLimitPrice + g_stopLossDist, _Digits);
+          double sellSL         = (structuralSL > 0.0 && structuralSL > sellLimitPrice) ? structuralSL : NormalizeDouble(sellLimitPrice + g_stopLossDist, _Digits);
           double sellTP         = (ArraySize(nearestLows) > 0) ? nearestLows[0] : ((g_takeProfitDist > 0.0) ? NormalizeDouble(sellLimitPrice - g_takeProfitDist, _Digits) : 0.0);
           
           // Apply safety stops clamping
