@@ -2073,6 +2073,22 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    GetRecentTradesHistory(tradeHistory);
    
    g_aiStrategy = "NONE";
+   
+   double fvgLow = 0.0, fvgHigh = 0.0;
+   int fvgType = 0;
+   GetLatestUnmitigatedFVG(fvgLow, fvgHigh, fvgType);
+   
+   double bullOB_Low = 0.0, bullOB_High = 0.0;
+   double bearOB_Low = 0.0, bearOB_High = 0.0;
+   GetNearestOrderBlocks(bullOB_Low, bullOB_High, bearOB_Low, bearOB_High);
+   
+   string ictDesc = "";
+   if(fvgType == 1) ictDesc += StringFormat("Latest unmitigated Bullish FVG (imbalance vacuum) at %.2f-%.2f. ", fvgLow, fvgHigh);
+   else if(fvgType == -1) ictDesc += StringFormat("Latest unmitigated Bearish FVG (imbalance vacuum) at %.2f-%.2f. ", fvgLow, fvgHigh);
+   else ictDesc += "No active FVG gaps. ";
+   
+   if(bullOB_Low > 0.0) ictDesc += StringFormat("Nearest Bullish Order Block (Bank Demand Wall) at %.2f-%.2f. ", bullOB_Low, bullOB_High);
+   if(bearOB_Low > 0.0) ictDesc += StringFormat("Nearest Bearish Order Block (Bank Supply Wall) at %.2f-%.2f. ", bearOB_Low, bearOB_High);
     
    string magnetDesc = "";
    double nearestHighs[];
@@ -2086,9 +2102,9 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "Macro Price History (Higher Timeframe): %s. "+
       "Candle Patterns (Last 3 Bars): %s. "+
       "Recent closed trades history: %s. "+
-      "Untested Price Magnets (Liquidity Pools): %s. "+
+      "Untested Price Magnets (Liquidity Pools): %s. "+"ICT Market Structure (Order Blocks & Fair Value Gaps): %s. "+
       "As a professional self-correcting quant trader, analyze the macro trend, price history, candle patterns (like Hammer/Pin Bar wicks representing rejection at support/resistance floors), and GNN magnets. "+
-      "Instructions: 1. During strong trends (ADX > 25.0 and clear direction above/below EMA200/VWAP), you are highly encouraged to execute a LONG_TERM trade in the direction of the trend (e.g., using VOLUME_BREAKOUT or DONCHIAN_BREAKOUT) to capture a major multi-hour move (targeting 30-50+ points) with a wide Stop Loss. 2. If the price has deeply retraced to a macro GNN support floor (like Aqua lines) and you detect a bullish rejection (Hammers/long lower shadows), issue a LONG_TERM BUY swing trade targeting the Golden GNN resistance ceiling (50+ points above) with a wide Stop Loss below the support floor. 3. Conversely, if price has spiked to a Golden resistance ceiling and shows bearish rejection (Shooting Stars), issue a LONG_TERM SELL swing trade targeting the Aqua support floor. 4. LONG_TERM trades bypass all time decay exits and are intended to run for 4-5 hours to secure large trend gains, even with small lot sizes. 5. CRITICAL: Do NOT execute SELL trades when the price is close to (within 5 points of) an untested GNN Support floor (Aqua line), and do NOT execute BUY trades when the price is close to (within 5 points of) an untested GNN Resistance ceiling (Golden line). Selling the support floor or buying the resistance ceiling leads to instant losses on pullbacks. Wait for a breakout or trade the bounce. Identify wick rejections and adjust your decision or stop loss buffer to let wicks breathe. "+
+      "Instructions: 1. During strong trends (ADX > 25.0 and clear direction above/below EMA200/VWAP), you are highly encouraged to execute a LONG_TERM trade in the direction of the trend (e.g., using VOLUME_BREAKOUT or DONCHIAN_BREAKOUT) to capture a major multi-hour move (targeting 30-50+ points) with a wide Stop Loss. 2. If the price has deeply retraced to a macro GNN support floor (like Aqua lines) and you detect a bullish rejection (Hammers/long lower shadows), issue a LONG_TERM BUY swing trade targeting the Golden GNN resistance ceiling (50+ points above) with a wide Stop Loss below the support floor. 3. Conversely, if price has spiked to a Golden resistance ceiling and shows bearish rejection (Shooting Stars), issue a LONG_TERM SELL swing trade targeting the Aqua support floor. 4. LONG_TERM trades bypass all time decay exits and are intended to run for 4-5 hours to secure large trend gains, even with small lot sizes. 5. CRITICAL: Do NOT execute SELL trades when the price is close to (within 5 points of) an untested GNN Support floor (Aqua line), and do NOT execute BUY trades when the price is close to (within 5 points of) an untested GNN Resistance ceiling (Golden line). Selling the support floor or buying the resistance ceiling leads to instant losses on pullbacks. Wait for a breakout or trade the bounce. Identify wick rejections and adjust your decision or stop loss buffer to let wicks breathe. 6. Under ICT Concepts: You are highly encouraged to buy when the price retraces to a Bullish Order Block, or sell when it rises to a Bearish Order Block. If a breakout leaves an FVG, you can choose to enter a limit order in the FVG zone rather than buying the top or selling the bottom. "+
       "Respond strictly with a JSON object containing: "+
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
@@ -2099,7 +2115,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words explaining decision and why you adjusted based on recent trades). "+
       "Example output: { 'decision': 'BUY', 'conviction': 95, 'regime': 'REVERSION', 'strategy': 'MEAN_REVERSION', 'horizon': 'LONG_TERM', 'stop_loss_price': 4065.00, 'take_profit_price': 4125.00, 'reason': 'Deep retracement to Aqua support with Hammer wick rejection' }.",
-      prevClose, trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, candlePatterns, tradeHistory, magnetDesc
+      prevClose, trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, candlePatterns, tradeHistory, magnetDesc, ictDesc
    );
 
    bool aiActive = false;
@@ -2247,8 +2263,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
           
           if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
           {
-             double limitPrice = NormalizeDouble(currentEMA, _Digits);
-             double pullbackSL = (structuralSL > 0.0 && structuralSL < limitPrice) ? structuralSL : NormalizeDouble(limitPrice - 0.80, _Digits);
+             double limitPrice = (bullOB_High > 0.0) ? bullOB_High : ((fvgType == 1) ? fvgHigh : NormalizeDouble(currentEMA, _Digits));
+             double pullbackSL = (structuralSL > 0.0 && structuralSL < limitPrice) ? structuralSL : ((bullOB_Low > 0.0) ? bullOB_Low : NormalizeDouble(limitPrice - 0.80, _Digits));
              double pullbackTP = (structuralTP > 0.0) ? structuralTP : NormalizeDouble(limitPrice + 2.00, _Digits);
              
              // Risk Cap
@@ -2274,8 +2290,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
           }
           else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
           {
-             double limitPrice = NormalizeDouble(currentEMA, _Digits);
-             double pullbackSL = (structuralSL > limitPrice) ? structuralSL : NormalizeDouble(limitPrice + 0.80, _Digits);
+             double limitPrice = (bearOB_Low > 0.0) ? bearOB_Low : ((fvgType == -1) ? fvgLow : NormalizeDouble(currentEMA, _Digits));
+             double pullbackSL = (structuralSL > limitPrice) ? structuralSL : ((bearOB_High > 0.0) ? bearOB_High : NormalizeDouble(limitPrice + 0.80, _Digits));
              double pullbackTP = (structuralTP > 0.0) ? structuralTP : NormalizeDouble(limitPrice - 2.00, _Digits);
              
              // Risk Cap
@@ -3059,6 +3075,162 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 //+------------------------------------------------------------------+
 //| Expert tick function                                             |
 //+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Get Latest Unmitigated Fair Value Gap (FVG)                       |
+//+------------------------------------------------------------------+
+void GetLatestUnmitigatedFVG(double &fvgLow, double &fvgHigh, int &fvgType)
+{
+   fvgLow = 0.0;
+   fvgHigh = 0.0;
+   fvgType = 0;
+   
+   for(int i = 2; i < 30; i++)
+   {
+      double low1 = iLow(_Symbol, _Period, i);
+      double high1 = iHigh(_Symbol, _Period, i);
+      
+      double low3 = iLow(_Symbol, _Period, i+2);
+      double high3 = iHigh(_Symbol, _Period, i+2);
+      
+      // Check Bullish FVG
+      if(low1 > high3)
+      {
+         bool mitigated = false;
+         for(int j = i - 1; j >= 1; j--)
+         {
+            if(iLow(_Symbol, _Period, j) <= high3)
+            {
+               mitigated = true;
+               break;
+            }
+         }
+         if(!mitigated)
+         {
+            fvgLow = high3;
+            fvgHigh = low1;
+            fvgType = 1; // Bullish FVG
+            return;
+         }
+      }
+      
+      // Check Bearish FVG
+      if(high1 < low3)
+      {
+         bool mitigated = false;
+         for(int j = i - 1; j >= 1; j--)
+         {
+            if(iHigh(_Symbol, _Period, j) >= low3)
+            {
+               mitigated = true;
+               break;
+            }
+         }
+         if(!mitigated)
+         {
+            fvgLow = high1;
+            fvgHigh = low3;
+            fvgType = -1; // Bearish FVG
+            return;
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Get Nearest Unmitigated Institutional Order Blocks (OB)          |
+//+------------------------------------------------------------------+
+void GetNearestOrderBlocks(double &bullOB_Low, double &bullOB_High, double &bearOB_Low, double &bearOB_High)
+{
+   bullOB_Low = 0.0;
+   bullOB_High = 0.0;
+   bearOB_Low = 0.0;
+   bearOB_High = 0.0;
+   
+   double atrVal[];
+   ArraySetAsSeries(atrVal, true);
+   if(CopyBuffer(g_atrHandle, 0, 1, 1, atrVal) <= 0) return;
+   double currentATR = atrVal[0];
+   
+   for(int i = 2; i < 40; i++)
+   {
+      double o = iOpen(_Symbol, _Period, i);
+      double h = iHigh(_Symbol, _Period, i);
+      double l = iLow(_Symbol, _Period, i);
+      double c = iClose(_Symbol, _Period, i);
+      
+      // 1. Check Bullish Order Block (bearish candle followed by strong bullish impulse)
+      if(c < o && bullOB_Low == 0.0)
+      {
+         bool impulseFound = false;
+         for(int j = i - 1; j >= MathMax(1, i - 3); j--)
+         {
+            double jo = iOpen(_Symbol, _Period, j);
+            double jc = iClose(_Symbol, _Period, j);
+            if(jc > jo && (jc - jo) >= 1.2 * currentATR)
+            {
+               impulseFound = true;
+               break;
+            }
+         }
+         
+         if(impulseFound)
+         {
+            bool mitigated = false;
+            for(int k = i - 1; k >= 1; k--)
+            {
+               if(iLow(_Symbol, _Period, k) < l)
+               {
+                  mitigated = true;
+                  break;
+               }
+            }
+            if(!mitigated)
+            {
+               bullOB_Low = l;
+               bullOB_High = h;
+            }
+         }
+      }
+      
+      // 2. Check Bearish Order Block (bullish candle followed by strong bearish impulse)
+      if(c > o && bearOB_Low == 0.0)
+      {
+         bool impulseFound = false;
+         for(int j = i - 1; j >= MathMax(1, i - 3); j--)
+         {
+            double jo = iOpen(_Symbol, _Period, j);
+            double jc = iClose(_Symbol, _Period, j);
+            if(jc < jo && (jo - jc) >= 1.2 * currentATR)
+            {
+               impulseFound = true;
+               break;
+            }
+         }
+         
+         if(impulseFound)
+         {
+            bool mitigated = false;
+            for(int k = i - 1; k >= 1; k--)
+            {
+               if(iHigh(_Symbol, _Period, k) > h)
+               {
+                  mitigated = true;
+                  break;
+               }
+            }
+            if(!mitigated)
+            {
+               bearOB_Low = l;
+               bearOB_High = h;
+            }
+         }
+      }
+      
+      if(bullOB_Low > 0.0 && bearOB_Low > 0.0) break;
+   }
+}
+
 void OnTick()
 {
    UpdateSpreadBuffer();
