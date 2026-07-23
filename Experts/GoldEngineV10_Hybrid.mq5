@@ -903,7 +903,9 @@ bool QueryGeminiDirect(string prompt, string &responseText)
 {
    if(InpGeminiAPIKey == "" || InpGeminiAPIKey == "PASTE_YOUR_API_KEY_HERE") return false;
    
-   string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
+   string cleanPrompt = prompt;
+   StringReplace(cleanPrompt, "\"", "\\\"");
+   string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + cleanPrompt + "\"}]}]}";
    string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + InpGeminiAPIKey;
    string headers = "Content-Type: application/json\r\n";
    
@@ -1169,7 +1171,7 @@ void QueryAIActiveTradeManagement()
          
          string prompt = StringFormat(
             "Gold (XAUUSD) active position management review. Type=%s, EntryPrice=%.2f, CurrentPrice=%.2f, CurrentSL=%.2f, CurrentProfit=%.2f. "+
-            "Recent 3 M1 candles: %s. "+
+            "Recent 3 closed candles: %s. "+
             "Evaluate position exit/trail. Respond strictly with a JSON object containing: 'action' ('HOLD', 'TIGHTEN', 'WIDEN', or 'CLOSE'), 'stop_distance' (double dollar offset from current price, e.g. 0.70), and 'reason' (short 10 words). "+
             "Example format: { 'action': 'TIGHTEN', 'stop_distance': 0.60, 'reason': 'Bearish trend forming close' }.",
             (type == POSITION_TYPE_BUY ? "BUY" : "SELL"), entryPrice, currentPrice, currentSL, currentProfit, barsHistory
