@@ -947,7 +947,13 @@ bool QueryGeminiDirect(string prompt, string &responseText)
    if(InpGeminiAPIKey == "" || InpGeminiAPIKey == "PASTE_YOUR_API_KEY_HERE") return false;
    
    string cleanPrompt = prompt;
+   // Replace backslashes first, then replace quotes and control characters to ensure clean JSON
+   StringReplace(cleanPrompt, "\\", "\\\\");
    StringReplace(cleanPrompt, "\"", "\\\"");
+   StringReplace(cleanPrompt, "\r", " ");
+   StringReplace(cleanPrompt, "\n", " ");
+   StringReplace(cleanPrompt, "\t", " ");
+   
    string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + cleanPrompt + "\"}]}]}";
    string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + InpGeminiAPIKey;
    string headers = "Content-Type: application/json\r\n";
