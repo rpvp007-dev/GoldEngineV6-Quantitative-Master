@@ -960,7 +960,11 @@ bool QueryGeminiConvictionEngine(double adx, double atr, double rsi, double ema)
    char post[];
    char result[];
    string responseHeaders = "";
-   StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+   int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+   if(bytes > 0 && post[bytes-1] == 0)
+   {
+      ArrayResize(post, bytes - 1);
+   }
    
    ResetLastError();
    int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
@@ -1252,7 +1256,11 @@ void TestGeminiAPI()
    char post[];
    char result[];
    string responseHeaders = "";
-   StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+   int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+   if(bytes > 0 && post[bytes-1] == 0)
+   {
+      ArrayResize(post, bytes - 1);
+   }
    
    ResetLastError();
    int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
