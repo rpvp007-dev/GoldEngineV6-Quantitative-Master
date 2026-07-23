@@ -1891,8 +1891,16 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
               double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
               double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
               
+              bool triggerBuy  = (prevClose > ch_high) && (prevClose >= curr_ema200);
+              bool triggerSell = (prevClose < ch_low)  && (prevClose < curr_ema200);
+              
               if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
               {
+                 if(!triggerBuy)
+                 {
+                    Print("[Quant Guard] Blocked AI Donchian BUY: Close (", prevClose, ") is not above Channel High (", ch_high, ") or EMA200 (", curr_ema200, ").");
+                    return false;
+                 }
                  double buySL = currentAsk - donchianSL;
                  double buyTP = currentAsk + donchianTP;
                  
@@ -1905,6 +1913,11 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
               }
               else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
               {
+                 if(!triggerSell)
+                 {
+                    Print("[Quant Guard] Blocked AI Donchian SELL: Close (", prevClose, ") is not below Channel Low (", ch_low, ") or EMA200 (", curr_ema200, ").");
+                    return false;
+                 }
                  double sellSL = currentBid + donchianSL;
                  double sellTP = currentBid - donchianTP;
                  
@@ -1949,8 +1962,20 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
               double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
               double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
               
+              double currVol = (double)iVolume(_Symbol, _Period, 1);
+              double volSMA10 = GetVolumeSMA(10);
+              bool volOk = (currVol >= InpVolumeMult1 * volSMA10);
+              
+              bool triggerBuy  = (prevClose > ch_high) && (prevClose >= curr_ema200) && volOk;
+              bool triggerSell = (prevClose < ch_low)  && (prevClose < curr_ema200)  && volOk;
+              
               if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
               {
+                 if(!triggerBuy)
+                 {
+                    Print("[Quant Guard] Blocked AI Vol Breakout BUY: Close (", prevClose, ") not above High (", ch_high, ") or Vol (", currVol, ") < 1.8x SMA (", volSMA10, ").");
+                    return false;
+                 }
                  double buySL = currentAsk - donchianSL;
                  double buyTP = currentAsk + donchianTP;
                  
@@ -1962,6 +1987,11 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
               }
               else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
               {
+                 if(!triggerSell)
+                 {
+                    Print("[Quant Guard] Blocked AI Vol Breakout SELL: Close (", prevClose, ") not below Low (", ch_low, ") or Vol (", currVol, ") < 1.8x SMA (", volSMA10, ").");
+                    return false;
+                 }
                  double sellSL = currentBid + donchianSL;
                  double sellTP = currentBid - donchianTP;
                  
@@ -2004,17 +2034,69 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
               double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
               double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
               
-              if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
-              {
-                 double buySL = currentAsk - pullbackSL;
-                 double buyTP = currentAsk + pullbackTP;
-                 
-                 double maxRiskSL = NormalizeDouble(currentAsk - (2.0 * g_stopLossDist), _Digits);
-                 if(buySL < maxRiskSL) buySL = maxRiskSL;
-                 
-                 trade.Buy(finalLotSize, _Symbol, currentAsk, buySL, buyTP, "AI VWAP Pullback BUY");
-                 return true;
-              }
+              double ema9Val[];
+               ArraySetAsSeries(ema9Val, true);
+               if(CopyBuffer(g_ema9Handle, 0, 1, 3, ema9Val) > 0)
+               {
+                  double close1 = iClose(_Symbol, _Period, 1);
+                  double close2 = iClose(_Symbol, _Period, 2);
+                  
+                  double low1 = iLow(_Symbol, _Period, 1);
+                  double low2 = iLow(_Symbol, _Period, 2);
+                  double low3 = iLow(_Symbol, _Period, 3);
+                  
+                  double high1 = iHigh(_Symbol, _Period, 1);
+                  double high2 = iHigh(_Symbol, _Period, 2);
+                  double high3 = iHigh(_Symbol, _Period, 3);
+                  
+                  double currRSI = currentRSI;
+                  double currVol = (double)iVolume(_Symbol, _Period, 1);
+                  double volSMA20 = GetVolumeSMA(20);
+                  bool volOk = (currVol >= InpVolumeMult2 * volSMA20);
+                  
+                  bool pullbackBuy = (low1 <= ema9Val[0] || low2 <= ema9Val[1] || low3 <= ema9Val[2]);
+                  bool triggerBuy = (close1 > ema9Val[0] && close2 <= ema9Val[1]);
+                  bool rsiBuyOk = (currRSI >= 45.0 && currRSI <= 65.0);
+                  bool trendBuyOk = (close1 > curr_ema200 && close1 > currentVWAP);
+                  
+                  bool pullbackSell = (high1 >= ema9Val[0] || high2 >= ema9Val[1] || high3 >= ema9Val[2]);
+                  bool triggerSell = (close1 < ema9Val[0] && close2 >= ema9Val[1]);
+                  bool rsiSellOk = (currRSI >= 35.0 && currRSI <= 55.0);
+                  bool trendSellOk = (close1 < curr_ema200 && close1 < currentVWAP);
+                  
+                  if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+                  {
+                     if(!(trendBuyOk && pullbackBuy && triggerBuy && volOk && rsiBuyOk))
+                     {
+                        Print("[Quant Guard] Blocked AI VWAP Pullback BUY: Indicators mismatch.");
+                        return false;
+                     }
+                     double buySL = currentAsk - pullbackSL;
+                     double buyTP = currentAsk + pullbackTP;
+                     
+                     double maxRiskSL = NormalizeDouble(currentAsk - (2.0 * g_stopLossDist), _Digits);
+                     if(buySL < maxRiskSL) buySL = maxRiskSL;
+                     
+                     trade.Buy(finalLotSize, _Symbol, currentAsk, buySL, buyTP, "AI VWAP Pullback BUY");
+                     return true;
+                  }
+                  else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+                  {
+                     if(!(trendSellOk && pullbackSell && triggerSell && volOk && rsiSellOk))
+                     {
+                        Print("[Quant Guard] Blocked AI VWAP Pullback SELL: Indicators mismatch.");
+                        return false;
+                     }
+                     double sellSL = currentBid + pullbackSL;
+                     double sellTP = currentBid - pullbackTP;
+                     
+                     double maxRiskSL = NormalizeDouble(currentBid + (2.0 * g_stopLossDist), _Digits);
+                     if(sellSL > maxRiskSL) sellSL = maxRiskSL;
+                     
+                     trade.Sell(finalLotSize, _Symbol, currentBid, sellSL, sellTP, "AI VWAP Pullback SELL");
+                     return true;
+                  }
+               }
               else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
               {
                  double sellSL = currentBid + pullbackSL;
