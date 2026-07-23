@@ -149,6 +149,7 @@ string         g_dailySentimentReason = "Analyzing macro...";
 string         g_aiDecision = "WAITING";
 int            g_aiConviction = 0;
 string         g_aiReason = "Awaiting setup...";
+string         g_aiStrategy = "NONE";
 
 //+------------------------------------------------------------------+
 //| Determine higher timeframe for trend alignment                  |
@@ -386,6 +387,10 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
    else if(period == PERIOD_H1) tfName = "H1 (1-Hour)";
    
    string modeStr = reversionModeActive ? "SIDEWAYS (Limits)" : "TRENDING (Stops)";
+   if(g_aiStrategy != "NONE" && g_aiStrategy != "")
+   {
+      modeStr += " (" + g_aiStrategy + ")";
+   }
    
    ObjectSetString(0, "DbTimeframe", OBJPROP_TEXT, "Chart Timeframe : " + tfName);
    ObjectSetInteger(0, "DbTimeframe", OBJPROP_COLOR, clrWhite);
@@ -1225,12 +1230,14 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          i, iOpen(_Symbol, _Period, i), iHigh(_Symbol, _Period, i), iLow(_Symbol, _Period, i), iClose(_Symbol, _Period, i), iVolume(_Symbol, _Period, i));
    }
    
+   g_aiStrategy = "NONE";
+
    string prompt = StringFormat(
       "Gold (XAUUSD) setup analysis. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f. "+
       "Price History: %s. "+
-      "As a professional quant, evaluate market regime (sideways limits vs breakout trend) and directional strength. "+
-      "Respond strictly with a JSON object containing: 'decision' ('BUY', 'SELL', or 'HOLD'), 'conviction' (integer 0 to 100), 'regime' ('BREAKOUT' or 'REVERSION'), and 'reason' (short 10 words). "+
-      "Example output: { 'decision': 'BUY', 'conviction': 85, 'regime': 'BREAKOUT', 'reason': 'Momentum breaking high' }.",
+      "As a professional quant, evaluate market regime and select the best strategy. "+
+      "Respond strictly with a JSON object containing: 'decision' ('BUY', 'SELL', or 'HOLD'), 'conviction' (integer 0 to 100), 'regime' ('BREAKOUT' or 'REVERSION'), 'strategy' ('BREAKOUT', 'MEAN_REVERSION', 'PULLBACK', 'STRADDLE', or 'SCALPING'), and 'reason' (short 10 words). "+
+      "Example output: { 'decision': 'BUY', 'conviction': 85, 'regime': 'BREAKOUT', 'strategy': 'BREAKOUT', 'reason': 'Momentum breaking high' }.",
       prevClose, currentADX, currentATR, currentRSI, currentEMA, barsHistory
    );
 
@@ -1247,6 +1254,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          string rawConviction = ExtractJSONValue(responseText, "conviction");
          string rawReason = ExtractJSONValue(responseText, "reason");
          rawRegime = ExtractJSONValue(responseText, "regime");
+         string rawStrategy = ExtractJSONValue(responseText, "strategy");
          
          // Clean decision
          if(StringFind(rawDecision, "BUY") >= 0) g_aiDecision = "BUY";
@@ -1258,6 +1266,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          if(g_aiConviction < 0) g_aiConviction = 0;
          if(g_aiConviction > 100) g_aiConviction = 100;
          
+         g_aiStrategy = (rawStrategy != "") ? rawStrategy : "BREAKOUT";
          g_aiReason = (rawReason != "") ? rawReason : "AI analyzed successfully.";
       }
       else
@@ -1304,7 +1313,100 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    if(finalLotSize < minLot) finalLotSize = minLot;
 
-   // --- Determine Entry Mode (AI Regime Switch or local ADX fallback) ---
+   // --- Execute Specific Strategy if Selected by AI ---
+   if(aiActive)
+   {
+      if(g_aiStrategy == "SCALPING")
+      {
+         double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+         double scalpingSL = NormalizeDouble(0.60, _Digits);
+         double scalpingTP = NormalizeDouble(0.80, _Digits);
+         
+         if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+         {
+            double slPrice = NormalizeDouble(currentBid - scalpingSL, _Digits);
+            double tpPrice = NormalizeDouble(currentBid + scalpingTP, _Digits);
+            trade.Buy(finalLotSize, _Symbol, currentAsk, slPrice, tpPrice, "AI Scalp BUY");
+            return true;
+         }
+         else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+         {
+            double slPrice = NormalizeDouble(currentAsk + scalpingSL, _Digits);
+            double tpPrice = NormalizeDouble(currentAsk - scalpingTP, _Digits);
+            trade.Sell(finalLotSize, _Symbol, currentBid, slPrice, tpPrice, "AI Scalp SELL");
+            return true;
+         }
+         return false;
+      }
+      
+      if(g_aiStrategy == "PULLBACK")
+      {
+         double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+         double pullbackSL = NormalizeDouble(0.80, _Digits);
+         double pullbackTP = NormalizeDouble(2.00, _Digits);
+         
+         if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+         {
+            double limitPrice = NormalizeDouble(currentEMA, _Digits);
+            if(MathAbs(currentBid - currentEMA) <= 0.30)
+            {
+               double slPrice = NormalizeDouble(currentBid - pullbackSL, _Digits);
+               double tpPrice = NormalizeDouble(currentBid + pullbackTP, _Digits);
+               trade.Buy(finalLotSize, _Symbol, currentAsk, slPrice, tpPrice, "AI Pullback BUY Market");
+            }
+            else
+            {
+               double slPrice = NormalizeDouble(limitPrice - pullbackSL, _Digits);
+               double tpPrice = NormalizeDouble(limitPrice + pullbackTP, _Digits);
+               trade.BuyLimit(finalLotSize, limitPrice, _Symbol, slPrice, tpPrice, ORDER_TIME_GTC, 0, "AI Pullback BUY Limit");
+            }
+            return true;
+         }
+         else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+         {
+            double limitPrice = NormalizeDouble(currentEMA, _Digits);
+            if(MathAbs(currentAsk - currentEMA) <= 0.30)
+            {
+               double slPrice = NormalizeDouble(currentAsk + pullbackSL, _Digits);
+               double tpPrice = NormalizeDouble(currentAsk - pullbackTP, _Digits);
+               trade.Sell(finalLotSize, _Symbol, currentBid, slPrice, tpPrice, "AI Pullback SELL Market");
+            }
+            else
+            {
+               double slPrice = NormalizeDouble(limitPrice + pullbackSL, _Digits);
+               double tpPrice = NormalizeDouble(limitPrice - pullbackTP, _Digits);
+               trade.SellLimit(finalLotSize, limitPrice, _Symbol, slPrice, tpPrice, ORDER_TIME_GTC, 0, "AI Pullback SELL Limit");
+            }
+            return true;
+         }
+         return false;
+      }
+      
+      if(g_aiStrategy == "STRADDLE")
+      {
+         double buyStopPrice  = NormalizeDouble(prevHigh + g_priceOffset + spread, _Digits);
+         double buySL         = NormalizeDouble(buyStopPrice - g_stopLossDist, _Digits);
+         double buyTP         = (g_takeProfitDist > 0.0) ? NormalizeDouble(buyStopPrice + g_takeProfitDist, _Digits) : 0.0;
+         
+         double sellStopPrice = NormalizeDouble(prevLow - g_priceOffset, _Digits);
+         double sellSL        = NormalizeDouble(sellStopPrice + g_stopLossDist, _Digits);
+         double sellTP        = (g_takeProfitDist > 0.0) ? NormalizeDouble(sellStopPrice - g_takeProfitDist, _Digits) : 0.0;
+         
+         if(g_dailySentiment != "SELL_ONLY")
+         {
+            trade.BuyStop(finalLotSize, buyStopPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "AI Straddle BUY");
+         }
+         if(g_dailySentiment != "BUY_ONLY")
+         {
+            trade.SellStop(finalLotSize, sellStopPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AI Straddle SELL");
+         }
+         return true;
+      }
+   }
+
+   // --- Determine Entry Mode (Fallback / Standard AI regime switch) ---
    bool useReversionMode = false;
    if(InpEnableHybridMode)
    {
