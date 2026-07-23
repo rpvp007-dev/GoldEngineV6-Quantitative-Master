@@ -50,6 +50,8 @@ input group "--- Sideways Hybrid Mode Settings ---"
 input bool     InpEnableHybridMode   = true;   // Enable Breakout/Reversion Switch
 input bool     InpUseLocalDonchianBreakout = true; // Use Donchian Breakout for local trending breakouts
 input double   InpMinADX             = 20.0;   // Custom Mode ONLY: ADX Threshold (Sideways < 20)
+input double   InpLimitOffset        = 0.05;   // Front-running offset for limit orders (points)
+input double   InpPriceRoundStep     = 0.05;   // Rounding step for limit orders (0.0 to disable)
 
 input group "--- Session Momentum Hours ---"
 input bool     InpUseSessionHours    = true;   // Breakouts allowed ONLY during Momentum Hours
@@ -216,6 +218,12 @@ bool CalculateReversionMode(double adxVal, bool isMomHour, bool isVolSpike, bool
    }
    
    return false;
+}
+
+double RoundToStep(double value, double step)
+{
+   if(step <= 0.0) return value;
+   return NormalizeDouble(MathRound(value / step) * step, _Digits);
 }
 
 //+------------------------------------------------------------------+
@@ -2451,9 +2459,14 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
        
        if(placeBuy)
        {
-          double buyLimitPrice = (ArraySize(nearestLows) > 0) ? nearestLows[0] : NormalizeDouble(prevLow - reversionOffset, _Digits);
+          double rawBuyPrice = (ArraySize(nearestLows) > 0) ? (nearestLows[0] + InpLimitOffset) : (prevLow - reversionOffset);
+          double buyLimitPrice = (InpPriceRoundStep > 0.0) ? RoundToStep(rawBuyPrice, InpPriceRoundStep) : NormalizeDouble(rawBuyPrice, _Digits);
           double buySL          = (structuralSL > 0.0 && structuralSL < buyLimitPrice) ? structuralSL : NormalizeDouble(buyLimitPrice - g_stopLossDist, _Digits);
-          double buyTP          = (ArraySize(nearestHighs) > 0) ? nearestHighs[0] : ((g_takeProfitDist > 0.0) ? NormalizeDouble(buyLimitPrice + g_takeProfitDist, _Digits) : 0.0);
+          
+          // Buy TP defaults to the target Sell Limit price (front-run Golden Magnet)
+          double rawBuyTPPrice = (ArraySize(nearestHighs) > 0) ? (nearestHighs[0] - InpLimitOffset) : 0.0;
+          double buyTP = (rawBuyTPPrice > 0.0) ? ((InpPriceRoundStep > 0.0) ? RoundToStep(rawBuyTPPrice, InpPriceRoundStep) : NormalizeDouble(rawBuyTPPrice, _Digits)) : 
+                         ((g_takeProfitDist > 0.0) ? NormalizeDouble(buyLimitPrice + g_takeProfitDist, _Digits) : 0.0);
           
           // Apply safety stops clamping
           double maxRiskSL = NormalizeDouble(buyLimitPrice - (2.0 * g_stopLossDist), _Digits);
@@ -2472,9 +2485,14 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
        
        if(placeSell)
        {
-          double sellLimitPrice = (ArraySize(nearestHighs) > 0) ? nearestHighs[0] : NormalizeDouble(prevHigh + reversionOffset, _Digits);
+          double rawSellPrice = (ArraySize(nearestHighs) > 0) ? (nearestHighs[0] - InpLimitOffset) : (prevHigh + reversionOffset);
+          double sellLimitPrice = (InpPriceRoundStep > 0.0) ? RoundToStep(rawSellPrice, InpPriceRoundStep) : NormalizeDouble(rawSellPrice, _Digits);
           double sellSL         = (structuralSL > 0.0 && structuralSL > sellLimitPrice) ? structuralSL : NormalizeDouble(sellLimitPrice + g_stopLossDist, _Digits);
-          double sellTP         = (ArraySize(nearestLows) > 0) ? nearestLows[0] : ((g_takeProfitDist > 0.0) ? NormalizeDouble(sellLimitPrice - g_takeProfitDist, _Digits) : 0.0);
+          
+          // Sell TP defaults to the target Buy Limit price (front-run Aqua Magnet)
+          double rawSellTPPrice = (ArraySize(nearestLows) > 0) ? (nearestLows[0] + InpLimitOffset) : 0.0;
+          double sellTP = (rawSellTPPrice > 0.0) ? ((InpPriceRoundStep > 0.0) ? RoundToStep(rawSellTPPrice, InpPriceRoundStep) : NormalizeDouble(rawSellTPPrice, _Digits)) : 
+                          ((g_takeProfitDist > 0.0) ? NormalizeDouble(sellLimitPrice - g_takeProfitDist, _Digits) : 0.0);
           
           // Apply safety stops clamping
           double maxRiskSL = NormalizeDouble(sellLimitPrice + (2.0 * g_stopLossDist), _Digits);
@@ -2942,8 +2960,11 @@ void OnTick()
          string dummy = "";
          GetUntestedMagnets(nearestHighs, nearestLows, dummy);
          
-         double targetBuy = (ArraySize(nearestLows) > 0) ? nearestLows[0] : 0.0;
-         double targetSell = (ArraySize(nearestHighs) > 0) ? nearestHighs[0] : 0.0;
+         double rawBuy = (ArraySize(nearestLows) > 0) ? (nearestLows[0] + InpLimitOffset) : 0.0;
+         double targetBuy = (rawBuy > 0.0) ? ((InpPriceRoundStep > 0.0) ? RoundToStep(rawBuy, InpPriceRoundStep) : NormalizeDouble(rawBuy, _Digits)) : 0.0;
+         
+         double rawSell = (ArraySize(nearestHighs) > 0) ? (nearestHighs[0] - InpLimitOffset) : 0.0;
+         double targetSell = (rawSell > 0.0) ? ((InpPriceRoundStep > 0.0) ? RoundToStep(rawSell, InpPriceRoundStep) : NormalizeDouble(rawSell, _Digits)) : 0.0;
          
          VerifyAndSyncSidewaysLimits(targetBuy, targetSell);
       }
