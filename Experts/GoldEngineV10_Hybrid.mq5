@@ -1475,7 +1475,14 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
              }
              else
              {
-                trade.BuyLimit(finalLotSize, limitPrice, _Symbol, pullbackSL, pullbackTP, ORDER_TIME_GTC, 0, "AI Pullback BUY Limit");
+                if(limitPrice > currentAsk)
+                {
+                   trade.BuyStop(finalLotSize, limitPrice, _Symbol, pullbackSL, pullbackTP, ORDER_TIME_GTC, 0, "AI Pullback BUY Stop");
+                }
+                else
+                {
+                   trade.BuyLimit(finalLotSize, limitPrice, _Symbol, pullbackSL, pullbackTP, ORDER_TIME_GTC, 0, "AI Pullback BUY Limit");
+                }
              }
              return true;
           }
@@ -1495,7 +1502,14 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
              }
              else
              {
-                trade.SellLimit(finalLotSize, limitPrice, _Symbol, pullbackSL, pullbackTP, ORDER_TIME_GTC, 0, "AI Pullback SELL Limit");
+                if(limitPrice < currentBid)
+                {
+                   trade.SellStop(finalLotSize, limitPrice, _Symbol, pullbackSL, pullbackTP, ORDER_TIME_GTC, 0, "AI Pullback SELL Stop");
+                }
+                else
+                {
+                   trade.SellLimit(finalLotSize, limitPrice, _Symbol, pullbackSL, pullbackTP, ORDER_TIME_GTC, 0, "AI Pullback SELL Limit");
+                }
              }
              return true;
           }
