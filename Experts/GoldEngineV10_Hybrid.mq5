@@ -2242,8 +2242,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
               double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
               double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
               
-              bool triggerBuy  = (prevClose > ch_high) && (prevClose >= curr_ema200);
-              bool triggerSell = (prevClose < ch_low)  && (prevClose < curr_ema200);
+              bool triggerBuy  = aiActive ? true : ((prevClose > ch_high) && (prevClose >= curr_ema200));
+              bool triggerSell = aiActive ? true : ((prevClose < ch_low)  && (prevClose < curr_ema200));
               
               if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
               {
@@ -2317,8 +2317,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
               double volSMA10 = GetVolumeSMA(10);
               bool volOk = (currVol >= InpVolumeMult1 * volSMA10);
               
-              bool triggerBuy  = (prevClose > ch_high) && (prevClose >= curr_ema200) && volOk;
-              bool triggerSell = (prevClose < ch_low)  && (prevClose < curr_ema200)  && volOk;
+              bool triggerBuy  = aiActive ? true : ((prevClose > ch_high) && (prevClose >= curr_ema200) && volOk);
+              bool triggerSell = aiActive ? true : ((prevClose < ch_low)  && (prevClose < curr_ema200)  && volOk);
               
               if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
               {
@@ -2417,7 +2417,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
                   
                   if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
                   {
-                     if(!(trendBuyOk && pullbackBuy && triggerBuy && volOk && rsiBuyOk))
+                     if(!aiActive && !(trendBuyOk && pullbackBuy && triggerBuy && volOk && rsiBuyOk))
                      {
                         Print("[Quant Guard] Blocked AI VWAP Pullback BUY: Indicators mismatch.");
                         return false;
@@ -2433,7 +2433,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
                   }
                   else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
                   {
-                     if(!(trendSellOk && pullbackSell && triggerSell && volOk && rsiSellOk))
+                     if(!aiActive && !(trendSellOk && pullbackSell && triggerSell && volOk && rsiSellOk))
                      {
                         Print("[Quant Guard] Blocked AI VWAP Pullback SELL: Indicators mismatch.");
                         return false;
