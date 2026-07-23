@@ -963,10 +963,10 @@ bool QueryAIDailySentiment()
    }
    
    string prompt = StringFormat(
-      "Gold (XAUUSD) Daily Bias Analysis. Current price=%.2f. Daily candles history: %s. "+
+      "Gold (XAUUSD) Daily Bias Analysis in json format. Current price=%.2f. Daily candles history: %s. "+
       "As a professional macro analyst, determine today's directional bias. "+
-      "Respond strictly with a JSON object containing: 'bias' ('BUY_ONLY', 'SELL_ONLY', or 'BI_DIRECTIONAL') and 'reason' (short 10 words). "+
-      "Example output format: { 'bias': 'BUY_ONLY', 'reason': 'Strong daily bullish engulfing' }.",
+      "Respond strictly with a json object containing: 'bias' ('BUY_ONLY', 'SELL_ONLY', or 'BI_DIRECTIONAL') and 'reason' (short 10 words). "+
+      "Example output format: { \"bias\": \"BUY_ONLY\", \"reason\": \"Strong daily bullish engulfing\" }.",
       SymbolInfoDouble(_Symbol, SYMBOL_BID), dailyHistory
    );
    
@@ -1708,20 +1708,20 @@ void TestAIEngines()
    {
       name = "Groq Llama-3.1";
       string resp = "";
-      success = QueryGroqDirect("Respond strictly with: OK", resp);
+      success = QueryGroqDirect("Respond strictly with status OK in json format. Example: {\"status\":\"OK\"}", resp);
    }
    else if(InpAIEngineSelection == AI_GEMINI)
    {
       name = "Gemini Flash";
       string resp = "";
-      success = QueryGeminiDirect("Respond strictly with: OK", resp);
+      success = QueryGeminiDirect("Respond strictly with status OK in json format. Example: {\"status\":\"OK\"}", resp);
    }
    else if(InpAIEngineSelection == AI_BOTH_FAILOVER)
    {
       name = "Gemini & Groq (Failover)";
       string resp = "";
-      bool gemSuccess = QueryGeminiDirect("Respond strictly with: OK", resp);
-      bool groqSuccess = QueryGroqDirect("Respond strictly with: OK", resp);
+      bool gemSuccess = QueryGeminiDirect("Respond strictly with status OK in json format. Example: {\"status\":\"OK\"}", resp);
+      bool groqSuccess = QueryGroqDirect("Respond strictly with status OK in json format. Example: {\"status\":\"OK\"}", resp);
       success = gemSuccess || groqSuccess;
       if(gemSuccess) g_aiReason = "Gemini API OK";
       else if(groqSuccess) g_aiReason = "Groq API OK (Gemini Offline)";
