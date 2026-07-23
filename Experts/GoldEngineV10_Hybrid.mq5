@@ -407,8 +407,8 @@ void UpdateButtonState()
 //+------------------------------------------------------------------+
 void CreateInterface()
 {
-   // Redesigned: 350px wide, 330px high to fit Combined Master System
-   int panelWidth  = 350;
+   // Redesigned: 550px wide, 330px high to fit Combined Master System
+   int panelWidth  = 550;
    int panelHeight = 330;
    int margin      = 25;
    int textX       = 20 + margin;
