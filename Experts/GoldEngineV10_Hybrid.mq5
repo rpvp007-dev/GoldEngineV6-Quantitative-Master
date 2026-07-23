@@ -140,8 +140,6 @@ input string   InpGroqAPIKey         = ""; // Groq API Key (console.groq.com)
 input bool     InpUseAIEngines       = true;    // Enable AI Brain Integration
 input ENUM_AI_ENGINE InpAIEngineSelection = AI_GROQ; // AI Engine Selection
 input int      InpMinConviction      = 50;      // Minimum AI Conviction to trade (0-100)
-input int      InpNewsOffsetHours    = 7;       // Hour offset (Broker vs New York Eastern Time)
-input int      InpNewsOffsetHours    = 7;       // Hour offset (Broker vs New York Eastern Time)
 
 input group "--- Core Risk Settings ---"
 input double   InpLotSize          = 0.10;     // Fixed Lot Size (If Compounding is disabled)
@@ -263,11 +261,6 @@ double         g_takeProfitDist;
 
 int            g_ema200M15Handle = INVALID_HANDLE;
 int            g_ema200H1Handle = INVALID_HANDLE;
-datetime       g_highImpactNewsTimes[];
-
-int            g_ema200M15Handle = INVALID_HANDLE;
-int            g_ema200H1Handle = INVALID_HANDLE;
-datetime       g_highImpactNewsTimes[];
 
 // Mid-Candle AI Call Cooldowns
 bool           g_midCandleQueried = false;
@@ -1680,7 +1673,6 @@ void FetchEconomicCalendar()
    string todayStr = StringFormat("%02d-%02d-%04d", dt.mon, dt.day, dt.year);
    
    g_upcomingNews = "";
-   ArrayResize(g_highImpactNewsTimes, 0);
    int pos = 0;
    
    while(true)
@@ -1707,50 +1699,6 @@ void FetchEconomicCalendar()
       {
          if(g_upcomingNews != "") g_upcomingNews += ", ";
          g_upcomingNews += StringFormat("%s at %s (Forecast: %s, Previous: %s)", title, time, forecast, previous);
-         
-         int colonIdx = StringFind(time, ":");
-         if(colonIdx > 0)
-         {
-            int hr = (int)StringToInteger(StringSubstr(time, 0, colonIdx));
-            int mn = (int)StringToInteger(StringSubstr(time, colonIdx + 1, 2));
-            string ampm = StringSubstr(time, StringLen(time) - 2);
-            if(ampm == "pm" && hr != 12) hr += 12;
-            if(ampm == "am" && hr == 12) hr = 0;
-            
-            MqlDateTime ndt;
-            TimeCurrent(ndt);
-            ndt.hour = hr;
-            ndt.min = mn;
-            ndt.sec = 0;
-            datetime estTime = StructToTime(ndt);
-            datetime brokerTime = estTime + (InpNewsOffsetHours * 3600);
-            
-            int nsize = ArraySize(g_highImpactNewsTimes);
-            ArrayResize(g_highImpactNewsTimes, nsize + 1);
-            g_highImpactNewsTimes[nsize] = brokerTime;
-         }
-         
-         int colonIdx = StringFind(time, ":");
-         if(colonIdx > 0)
-         {
-            int hr = (int)StringToInteger(StringSubstr(time, 0, colonIdx));
-            int mn = (int)StringToInteger(StringSubstr(time, colonIdx + 1, 2));
-            string ampm = StringSubstr(time, StringLen(time) - 2);
-            if(ampm == "pm" && hr != 12) hr += 12;
-            if(ampm == "am" && hr == 12) hr = 0;
-            
-            MqlDateTime ndt;
-            TimeCurrent(ndt);
-            ndt.hour = hr;
-            ndt.min = mn;
-            ndt.sec = 0;
-            datetime estTime = StructToTime(ndt);
-            datetime brokerTime = estTime + (InpNewsOffsetHours * 3600);
-            
-            int nsize = ArraySize(g_highImpactNewsTimes);
-            ArrayResize(g_highImpactNewsTimes, nsize + 1);
-            g_highImpactNewsTimes[nsize] = brokerTime;
-         }
       }
    }
    
@@ -2269,19 +2217,6 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       }
     }
 
-    if(g_aiDecision == "BUY" || g_aiDecision == "SELL")
-    {
-       if(IsNewsBlockoutActive())
-       {
-          Print("[News Blockout] Blocked trade execution due to high impact news nearby.");
-          return false;
-       }
-       if(!CheckTrendConfluence(g_aiDecision))
-       {
-          return false;
-       }
-    }
-    
     if(g_aiDecision == "BUY" || g_aiDecision == "SELL")
     {
        if(!CheckTrendConfluence(g_aiDecision))
@@ -3075,8 +3010,6 @@ int OnInit()
    g_ema9Handle   = iMA(_Symbol, _Period, InpEMA9Length, 0, MODE_EMA, PRICE_CLOSE);
    g_ema200M15Handle = iMA(_Symbol, PERIOD_M15, 200, 0, MODE_EMA, PRICE_CLOSE);
    g_ema200H1Handle = iMA(_Symbol, PERIOD_H1, 200, 0, MODE_EMA, PRICE_CLOSE);
-   g_ema200M15Handle = iMA(_Symbol, PERIOD_M15, 200, 0, MODE_EMA, PRICE_CLOSE);
-   g_ema200H1Handle = iMA(_Symbol, PERIOD_H1, 200, 0, MODE_EMA, PRICE_CLOSE);
    
    if(g_emaHandle == INVALID_HANDLE || g_emaHigherHandle == INVALID_HANDLE || 
       g_atrHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE || g_adxHandle == INVALID_HANDLE ||
@@ -3378,7 +3311,6 @@ void ManageSidewaysEscape(bool reversionModeActive)
 void CheckMidCandleTriggers(datetime currentBarTime)
 {
    if(!InpUseAIEngines || !g_eaRunning) return;
-
    if(CountActiveTrades() > 0) return;
    
    if(g_midCandleQueried || (TimeCurrent() - g_lastAICallTime < 30)) return;
@@ -3450,141 +3382,6 @@ void CheckMidCandleTriggers(datetime currentBarTime)
    }
 }
 
-
-//+------------------------------------------------------------------+
-//| Check if News Blockout is active (5 min before or 10 min after)   |
-//+------------------------------------------------------------------+
-bool IsNewsBlockoutActive()
-{
-   int size = ArraySize(g_highImpactNewsTimes);
-   if(size == 0) return false;
-   
-   datetime now = TimeCurrent();
-   for(int i = 0; i < size; i++)
-   {
-      datetime newsTime = g_highImpactNewsTimes[i];
-      if(now >= newsTime - 300 && now <= newsTime + 600)
-      {
-         return true;
-      }
-   }
-   return false;
-}
-
-//+------------------------------------------------------------------+
-//| Check Multi-Timeframe Trend Confluence (Tide Guard)              |
-//+------------------------------------------------------------------+
-bool CheckTrendConfluence(string decision)
-{
-   double ema200Val[];
-   if(CopyBuffer(g_ema200Handle, 0, 1, 1, ema200Val) <= 0) return false;
-   double prevCloseVal = iClose(_Symbol, _Period, 1);
-   int trendCurrent = (prevCloseVal > ema200Val[0]) ? 1 : -1;
-   
-   double ema200M15Val[];
-   if(CopyBuffer(g_ema200M15Handle, 0, 1, 1, ema200M15Val) <= 0) return false;
-   double closeM15 = iClose(_Symbol, PERIOD_M15, 1);
-   int trendM15 = (closeM15 > ema200M15Val[0]) ? 1 : -1;
-   
-   double ema200H1Val[];
-   if(CopyBuffer(g_ema200H1Handle, 0, 1, 1, ema200H1Val) <= 0) return false;
-   double closeH1 = iClose(_Symbol, PERIOD_H1, 1);
-   int trendH1 = (closeH1 > ema200H1Val[0]) ? 1 : -1;
-   
-   int bullishCount = 0;
-   if(trendCurrent == 1) bullishCount++;
-   if(trendM15 == 1) bullishCount++;
-   if(trendH1 == 1) bullishCount++;
-   
-   if(decision == "BUY" && bullishCount < 2)
-   {
-      PrintFormat("[Tide Guard Block] BUY rejected. Bullish confluence: %d/3 (Current: %s, M15: %s, H1: %s)", 
-         bullishCount, (trendCurrent==1)?"UP":"DN", (trendM15==1)?"UP":"DN", (trendH1==1)?"UP":"DN");
-      return false;
-   }
-   if(decision == "SELL" && bullishCount > 1)
-   {
-      PrintFormat("[Tide Guard Block] SELL rejected. Bearish confluence: %d/3 (Current: %s, M15: %s, H1: %s)", 
-         3-bullishCount, (trendCurrent==-1)?"DN":"UP", (trendM15==-1)?"DN":"UP", (trendH1==-1)?"DN":"UP");
-      return false;
-   }
-   return true;
-}
-
-//+------------------------------------------------------------------+
-//| Draw FVG and OB colored boxes on chart                           |
-//+------------------------------------------------------------------+
-void DrawICTVisualBoxes()
-{
-   int total = ObjectsTotal(0, 0, OBJ_RECTANGLE);
-   for(int i = total - 1; i >= 0; i--)
-   {
-      string name = ObjectName(0, i, 0, OBJ_RECTANGLE);
-      if(StringFind(name, "GE_OB_") == 0 || StringFind(name, "GE_FVG_") == 0)
-      {
-         ObjectDelete(0, name);
-      }
-   }
-   
-   double fvgLow = 0.0, fvgHigh = 0.0;
-   int fvgType = 0;
-   GetLatestUnmitigatedFVG(fvgLow, fvgHigh, fvgType);
-   
-   double bullOB_Low = 0.0, bullOB_High = 0.0;
-   double bearOB_Low = 0.0, bearOB_High = 0.0;
-   GetNearestOrderBlocks(bullOB_Low, bullOB_High, bearOB_Low, bearOB_High);
-   
-   datetime currentBarTime = iTime(_Symbol, _Period, 0);
-   datetime extendTime = currentBarTime + PeriodSeconds(_Period) * 8;
-   
-   if(fvgType != 0)
-   {
-      string name = StringFormat("GE_FVG_%s", (fvgType == 1)?"BULL":"BEAR");
-      ObjectCreate(0, name, OBJ_RECTANGLE, 0, currentBarTime - PeriodSeconds(_Period)*10, fvgLow, extendTime, fvgHigh);
-      ObjectSetInteger(0, name, OBJPROP_COLOR, (fvgType == 1) ? C'0x15,0x40,0x80' : C'0x80,0x15,0x40');
-      ObjectSetInteger(0, name, OBJPROP_FILL, true);
-      ObjectSetInteger(0, name, OBJPROP_BACK, true);
-   }
-   
-   if(bullOB_High > 0.0)
-   {
-      string name = "GE_OB_BULL";
-      ObjectCreate(0, name, OBJ_RECTANGLE, 0, currentBarTime - PeriodSeconds(_Period)*20, bullOB_Low, extendTime, bullOB_High);
-      ObjectSetInteger(0, name, OBJPROP_COLOR, C'0x0C,0x40,0x0C');
-      ObjectSetInteger(0, name, OBJPROP_FILL, true);
-      ObjectSetInteger(0, name, OBJPROP_BACK, true);
-   }
-   
-   if(bearOB_High > 0.0)
-   {
-      string name = "GE_OB_BEAR";
-      ObjectCreate(0, name, OBJ_RECTANGLE, 0, currentBarTime - PeriodSeconds(_Period)*20, bearOB_Low, extendTime, bearOB_High);
-      ObjectSetInteger(0, name, OBJPROP_COLOR, C'0x40,0x0C,0x0C');
-      ObjectSetInteger(0, name, OBJPROP_FILL, true);
-      ObjectSetInteger(0, name, OBJPROP_BACK, true);
-   }
-}
-
-
-//+------------------------------------------------------------------+
-//| Check if News Blockout is active (5 min before or 10 min after)   |
-//+------------------------------------------------------------------+
-bool IsNewsBlockoutActive()
-{
-   int size = ArraySize(g_highImpactNewsTimes);
-   if(size == 0) return false;
-   
-   datetime now = TimeCurrent();
-   for(int i = 0; i < size; i++)
-   {
-      datetime newsTime = g_highImpactNewsTimes[i];
-      if(now >= newsTime - 300 && now <= newsTime + 600)
-      {
-         return true;
-      }
-   }
-   return false;
-}
 
 //+------------------------------------------------------------------+
 //| Check Multi-Timeframe Trend Confluence (Tide Guard)              |
@@ -3760,8 +3557,6 @@ void OnTick()
    
    // Process Sideways Escape
    ManageSidewaysEscape(useReversionMode);
-   
-
 
    // Check if EA is paused by the on-chart button
    if(!g_eaRunning)
@@ -3775,8 +3570,6 @@ void OnTick()
    
    if(isNewBar)
    {
-      // Draw FVG & Order Block Visual Boxes on new bar close
-      DrawICTVisualBoxes();
       // Draw FVG & Order Block Visual Boxes on new bar close
       DrawICTVisualBoxes();
       if(g_lastBarTime != 0)
