@@ -791,30 +791,50 @@ void ManageCandleCloseLossCutting()
 //+------------------------------------------------------------------+
 string ExtractJSONValue(string json, string key)
 {
-   string searchKey = "\"" + key + "\"";
+   // Try matching escaped quotes first: \"key\"
+   string searchKey = "\\\"" + key + "\\\"";
    int startIdx = StringFind(json, searchKey);
+   
+   // If not found, try matching normal quotes: "key"
+   if(startIdx < 0)
+   {
+      searchKey = "\"" + key + "\"";
+      startIdx = StringFind(json, searchKey);
+   }
+   
+   // If still not found, try matching single quotes: 'key'
+   if(startIdx < 0)
+   {
+      searchKey = "'" + key + "'";
+      startIdx = StringFind(json, searchKey);
+   }
+   
    if(startIdx < 0) return "";
    
    int colonIdx = StringFind(json, ":", startIdx + StringLen(searchKey));
    if(colonIdx < 0) return "";
    
    int valStart = colonIdx + 1;
-   while(valStart < StringLen(json) && 
-         (StringSubstr(json, valStart, 1) == " " || 
-          StringSubstr(json, valStart, 1) == "\t" || 
-          StringSubstr(json, valStart, 1) == "\r" || 
-          StringSubstr(json, valStart, 1) == "\n" || 
-          StringSubstr(json, valStart, 1) == "\"" ||
-          StringSubstr(json, valStart, 1) == "'"))
+   while(valStart < StringLen(json))
    {
-      valStart++;
+      string charStr = StringSubstr(json, valStart, 1);
+      if(charStr == " " || charStr == "\t" || charStr == "\r" || charStr == "\n" || 
+         charStr == "\"" || charStr == "'" || charStr == "\\" || charStr == "{")
+      {
+         valStart++;
+      }
+      else
+      {
+         break;
+      }
    }
    
    int valEnd = valStart;
    while(valEnd < StringLen(json))
    {
       string charStr = StringSubstr(json, valEnd, 1);
-      if(charStr == "\"" || charStr == "'" || charStr == "," || charStr == "}" || charStr == "\r" || charStr == "\n")
+      if(charStr == "\"" || charStr == "'" || charStr == "," || charStr == "}" || 
+         charStr == "\\" || charStr == "\r" || charStr == "\n")
       {
          break;
       }
@@ -854,6 +874,7 @@ bool CallAI(string prompt, string &responseText)
       if(res == 200)
       {
          responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+         Print("[Gemini Success] Response: ", responseText);
          return true;
       }
       else
@@ -868,7 +889,7 @@ bool CallAI(string prompt, string &responseText)
    {
       string cleanPrompt = prompt;
       StringReplace(cleanPrompt, "\"", "\\\"");
-      string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + cleanPrompt + "\"}],\"temperature\":0.2}";
+      string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + cleanPrompt + "\"}],\"temperature\":0.2,\"response_format\":{\"type\":\"json_object\"}}";
       string url = "https://api.groq.com/openai/v1/chat/completions";
       string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpGroqAPIKey + "\r\n";
       
@@ -886,6 +907,7 @@ bool CallAI(string prompt, string &responseText)
       if(res == 200)
       {
          responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+         Print("[Groq Success] Response: ", responseText);
          return true;
       }
       else
@@ -1462,7 +1484,7 @@ void TestAIEngines()
       string prompt = "Respond strictly with the word OK";
       string responseText = "";
       
-      string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + prompt + "\"}],\"temperature\":0.2}";
+      string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + prompt + "\"}],\"temperature\":0.2,\"response_format\":{\"type\":\"json_object\"}}";
       string url = "https://api.groq.com/openai/v1/chat/completions";
       string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpGroqAPIKey + "\r\n";
       
