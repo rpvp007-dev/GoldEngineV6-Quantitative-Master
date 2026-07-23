@@ -851,7 +851,7 @@ void VerifyAndSyncSidewaysLimits(double targetBuyPrice, double targetSellPrice)
 //+------------------------------------------------------------------+
 //| Manage active positions on candle close (Active Loss-Cutting)    |
 //+------------------------------------------------------------------+
-void ManageCandleCloseLossCutting()
+void ManageCandleCloseLossCutting(bool reversionModeActive)
 {
    double stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
@@ -873,7 +873,7 @@ void ManageCandleCloseLossCutting()
             
             if(type == POSITION_TYPE_BUY)
             {
-               if(InpEnableRejectionExit && prevClose < prevOpen)
+               if(InpEnableRejectionExit && prevClose < prevOpen && !reversionModeActive)
                {
                   Print(StringFormat("[V10 SOFT STOP] Closing BUY ticket #%I64u due to Bearish Close.", ticket));
                   trade.PositionClose(ticket);
@@ -898,7 +898,7 @@ void ManageCandleCloseLossCutting()
             }
             else if(type == POSITION_TYPE_SELL)
             {
-               if(InpEnableRejectionExit && prevClose > prevOpen)
+               if(InpEnableRejectionExit && prevClose > prevOpen && !reversionModeActive)
                {
                   Print(StringFormat("[V10 SOFT STOP] Closing SELL ticket #%I64u due to Bullish Close.", ticket));
                   trade.PositionClose(ticket);
@@ -2920,7 +2920,7 @@ void OnTick()
    {
       if(g_lastBarTime != 0)
       {
-         ManageCandleCloseLossCutting();
+         ManageCandleCloseLossCutting(useReversionMode);
          
          // Trigger AI active trade management dynamically on candle close
          if(CountActiveTrades() > 0)
