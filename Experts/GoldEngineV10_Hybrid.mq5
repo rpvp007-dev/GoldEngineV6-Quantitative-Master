@@ -1815,6 +1815,31 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    // Lock queries for the current candle to exactly once
    g_lastOrderPlacedBarTime = currentBarTime;
 
+   // --- Determine Entry Mode (Fallback / Standard AI regime switch) ---
+   bool useReversionMode = false;
+   if(InpEnableHybridMode)
+   {
+      if(currentADX < g_minADX)
+      {
+         useReversionMode = true;
+      }
+      else if(aiActive)
+      {
+         useReversionMode = (rawRegime == "REVERSION");
+      }
+      else
+      {
+         if(InpUseSessionHours && !isMomentumHour)
+         {
+            useReversionMode = true;
+            if(isVolatilitySpike)
+            {
+               useReversionMode = false;
+            }
+         }
+      }
+   }
+
    // Dynamic Risk Scaling factor based on conviction
    double convictionMultiplier = 1.0;
    if(aiActive)
@@ -1852,7 +1877,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
     }
 
     // --- Execute Specific Strategy if Selected by AI ---
-    if(aiActive)
+    if(aiActive && !useReversionMode)
     {
        if(g_aiStrategy == "SCALPING")
        {
@@ -2228,31 +2253,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
         }
      }
 
-    // --- Determine Entry Mode (Fallback / Standard AI regime switch) ---
-    bool useReversionMode = false;
-    if(InpEnableHybridMode)
-    {
-       if(aiActive)
-       {
-          useReversionMode = (rawRegime == "REVERSION");
-       }
-       else
-       {
-          // Fallback to local indicators
-          if(InpUseSessionHours && !isMomentumHour)
-          {
-             useReversionMode = true;
-             if(isVolatilitySpike)
-             {
-                useReversionMode = false;
-             }
-          }
-          else if(currentADX < g_minADX)
-          {
-             useReversionMode = true;
-          }
-       }
-    }
+
 
     // Place Orders in accordance with Daily Sentiment Anchor
     if(useReversionMode)
@@ -2329,35 +2330,53 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
           }
        }
 
-       // --- SIDEWAYS RANGE MODE (Limit Orders) ---
-       double reversionOffset = (InpTimeframeMode == TF_M1 || (InpTimeframeMode == TF_AUTO && _Period == PERIOD_M1)) ? 0.08 : 0.15;
+        // --- SIDEWAYS RANGE MODE (Limit Orders) ---
+        double reversionOffset = (InpTimeframeMode == TF_M1 || (InpTimeframeMode == TF_AUTO && _Period == PERIOD_M1)) ? 0.08 : 0.15;
+        
+        bool placeBuy = (g_dailySentiment != "SELL_ONLY") && (!aiActive || StringFind(g_aiDecision, "BUY") >= 0);
+        bool placeSell = (g_dailySentiment != "BUY_ONLY") && (!aiActive || StringFind(g_aiDecision, "SELL") >= 0);
        
-       bool placeBuy = (g_dailySentiment != "SELL_ONLY") && (!aiActive || StringFind(g_aiDecision, "BUY") >= 0);
-       bool placeSell = (g_dailySentiment != "BUY_ONLY") && (!aiActive || StringFind(g_aiDecision, "SELL") >= 0);
-      
-      if(placeBuy)
-      {
-         double buyLimitPrice  = NormalizeDouble(prevLow - reversionOffset, _Digits);
-         double buySL          = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(buyLimitPrice - g_stopLossDist, _Digits);
-         double buyTP          = (structuralTP > 0.0) ? structuralTP : ((g_takeProfitDist > 0.0) ? NormalizeDouble(buyLimitPrice + g_takeProfitDist, _Digits) : 0.0);
-         
-         double maxRiskSL = NormalizeDouble(buyLimitPrice - (2.0 * g_stopLossDist), _Digits);
-         if(buySL < maxRiskSL) buySL = maxRiskSL;
-         
-         trade.BuyLimit(finalLotSize, buyLimitPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "AI Buy Limit Reversion");
-      }
-      
-      if(placeSell)
-      {
-         double sellLimitPrice = NormalizeDouble(prevHigh + reversionOffset, _Digits);
-         double sellSL         = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(sellLimitPrice + g_stopLossDist, _Digits);
-         double sellTP         = (structuralTP > 0.0) ? structuralTP : ((g_takeProfitDist > 0.0) ? NormalizeDouble(sellLimitPrice - g_takeProfitDist, _Digits) : 0.0);
-         
-         double maxRiskSL = NormalizeDouble(sellLimitPrice + (2.0 * g_stopLossDist), _Digits);
-         if(sellSL > maxRiskSL) sellSL = maxRiskSL;
-         
-         trade.SellLimit(finalLotSize, sellLimitPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AI Sell Limit Reversion");
-      }
+       if(placeBuy)
+       {
+          double buyLimitPrice = (ArraySize(nearestLows) > 0) ? nearestLows[0] : NormalizeDouble(prevLow - reversionOffset, _Digits);
+          double buySL          = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(buyLimitPrice - g_stopLossDist, _Digits);
+          double buyTP          = (ArraySize(nearestHighs) > 0) ? nearestHighs[0] : ((g_takeProfitDist > 0.0) ? NormalizeDouble(buyLimitPrice + g_takeProfitDist, _Digits) : 0.0);
+          
+          // Apply safety stops clamping
+          double maxRiskSL = NormalizeDouble(buyLimitPrice - (2.0 * g_stopLossDist), _Digits);
+          if(buySL < maxRiskSL) buySL = maxRiskSL;
+          
+          // Force minimum 1:1 risk-to-reward on dynamic target
+          if(buyTP > buyLimitPrice && buySL < buyLimitPrice)
+          {
+             double tpDist = buyTP - buyLimitPrice;
+             double slDist = buyLimitPrice - buySL;
+             if(tpDist < slDist) buyTP = buyLimitPrice + slDist;
+          }
+          
+          trade.BuyLimit(finalLotSize, buyLimitPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "AI Buy Limit Reversion");
+       }
+       
+       if(placeSell)
+       {
+          double sellLimitPrice = (ArraySize(nearestHighs) > 0) ? nearestHighs[0] : NormalizeDouble(prevHigh + reversionOffset, _Digits);
+          double sellSL         = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(sellLimitPrice + g_stopLossDist, _Digits);
+          double sellTP         = (ArraySize(nearestLows) > 0) ? nearestLows[0] : ((g_takeProfitDist > 0.0) ? NormalizeDouble(sellLimitPrice - g_takeProfitDist, _Digits) : 0.0);
+          
+          // Apply safety stops clamping
+          double maxRiskSL = NormalizeDouble(sellLimitPrice + (2.0 * g_stopLossDist), _Digits);
+          if(sellSL > maxRiskSL) sellSL = maxRiskSL;
+          
+          // Force minimum 1:1 risk-to-reward on dynamic target
+          if(sellTP < sellLimitPrice && sellSL > sellLimitPrice)
+          {
+             double tpDist = sellLimitPrice - sellTP;
+             double slDist = sellSL - sellLimitPrice;
+             if(tpDist < slDist) sellTP = sellLimitPrice - slDist;
+          }
+          
+          trade.SellLimit(finalLotSize, sellLimitPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AI Sell Limit Reversion");
+       }
       
       return true;
    }
