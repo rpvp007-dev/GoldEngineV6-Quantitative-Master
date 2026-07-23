@@ -1407,13 +1407,49 @@ string GetXMLNodeValue(string xml, string tag)
 
 void FetchEconomicCalendar()
 {
-   // Only fetch once every 6 hours to prevent rate limits
-   if(g_lastCalendarFetchTime > 0 && TimeCurrent() - g_lastCalendarFetchTime < 21600 && g_upcomingNews != "None")
+   // Check terminal global variable to see when the last successful fetch occurred
+   datetime lastFetch = 0;
+   if(GlobalVariableCheck("GoldEngine_LastCalendarFetch"))
    {
-      return;
+      lastFetch = (datetime)GlobalVariableGet("GoldEngine_LastCalendarFetch");
    }
    
-   g_lastCalendarFetchTime = TimeCurrent();
+   // If last fetch was less than 6 hours ago, read the cached news string from file
+   if(lastFetch > 0 && TimeCurrent() - lastFetch < 21600)
+   {
+      int fileHandle = FileOpen("GoldEngine_Calendar.txt", FILE_READ|FILE_TXT|FILE_ANSI);
+      if(fileHandle != INVALID_HANDLE)
+      {
+         g_upcomingNews = FileReadString(fileHandle);
+         FileClose(fileHandle);
+         g_lastCalendarFetchTime = lastFetch;
+         if(g_upcomingNews != "" && g_upcomingNews != "None")
+         {
+            Print("[Calendar Cache] Loaded from file: ", g_upcomingNews);
+            return;
+         }
+      }
+   }
+   
+   // If we got rate-limited recently (429 status code), back off for 1 hour to cool down
+   datetime lastFail = 0;
+   if(GlobalVariableCheck("GoldEngine_LastCalendarFail"))
+   {
+      lastFail = (datetime)GlobalVariableGet("GoldEngine_LastCalendarFail");
+   }
+   if(lastFail > 0 && TimeCurrent() - lastFail < 3600)
+   {
+      // Load fallback cache if available
+      int fileHandle = FileOpen("GoldEngine_Calendar.txt", FILE_READ|FILE_TXT|FILE_ANSI);
+      if(fileHandle != INVALID_HANDLE)
+      {
+         g_upcomingNews = FileReadString(fileHandle);
+         FileClose(fileHandle);
+      }
+      if(g_upcomingNews == "") g_upcomingNews = "None";
+      Print("[Calendar Cooldown] Backing off after rate limit. Fallback: ", g_upcomingNews);
+      return;
+   }
    
    string url = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml";
    string headers = "";
@@ -1426,6 +1462,18 @@ void FetchEconomicCalendar()
    if(res != 200)
    {
       Print("[Calendar Fail] HTTP Status: ", res, ", Error code: ", GetLastError());
+      
+      // Store fail timestamp to back off
+      GlobalVariableSet("GoldEngine_LastCalendarFail", (double)TimeCurrent());
+      
+      // Load fallback cache so the EA continues to work
+      int fileHandle = FileOpen("GoldEngine_Calendar.txt", FILE_READ|FILE_TXT|FILE_ANSI);
+      if(fileHandle != INVALID_HANDLE)
+      {
+         g_upcomingNews = FileReadString(fileHandle);
+         FileClose(fileHandle);
+      }
+      if(g_upcomingNews == "") g_upcomingNews = "None";
       return;
    }
    
@@ -1469,6 +1517,15 @@ void FetchEconomicCalendar()
    if(g_upcomingNews == "")
    {
       g_upcomingNews = "None";
+   }
+   
+   // Cache successful result to file and update terminal global variable
+   GlobalVariableSet("GoldEngine_LastCalendarFetch", (double)TimeCurrent());
+   int fileHandle = FileOpen("GoldEngine_Calendar.txt", FILE_WRITE|FILE_TXT|FILE_ANSI);
+   if(fileHandle != INVALID_HANDLE)
+   {
+      FileWriteString(fileHandle, g_upcomingNews);
+      FileClose(fileHandle);
    }
    
    Print("[Calendar Success] USD Today's News: ", g_upcomingNews);
