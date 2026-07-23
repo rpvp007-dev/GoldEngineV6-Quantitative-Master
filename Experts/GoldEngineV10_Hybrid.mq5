@@ -1795,13 +1795,13 @@ void DrawMagnetLine(string name, double price, color clr)
 //+------------------------------------------------------------------+
 double GetChannelHigh(int length)
 {
-   int highest_index = iHighest(_Symbol, _Period, MODE_HIGH, length, 1);
+   int highest_index = iHighest(_Symbol, _Period, MODE_HIGH, length, 2);
    return iHigh(_Symbol, _Period, highest_index);
 }
 
 double GetChannelLow(int length)
 {
-   int lowest_index = iLowest(_Symbol, _Period, MODE_LOW, length, 1);
+   int lowest_index = iLowest(_Symbol, _Period, MODE_LOW, length, 2);
    return iLow(_Symbol, _Period, lowest_index);
 }
 
