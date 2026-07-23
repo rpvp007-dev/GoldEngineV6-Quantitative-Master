@@ -38,13 +38,13 @@ input int      InpMinConviction      = 50;      // Minimum AI Conviction to trad
 
 input group "--- Core Risk Settings ---"
 input double   InpLotSize          = 0.10;     // Fixed Lot Size (If Compounding is disabled)
-input double   InpTargetRiskUSD    = 10.00;    // Target dollar risk per trade ($)
+input double   InpTargetRiskUSD    = 25.00;    // Target dollar risk per trade ($)
 input ulong    InpMagicNumber      = 123456;   // Magic Number
 
 input group "--- Compounding Settings ---"
 input bool     InpEnableCompounding = true;    // Enable Lot Compounding (scales target risk)
 input double   InpLotsPerStep       = 0.10;    // (Legacy reference lot size)
-input double   InpBalanceStep       = 500.00;  // Per how much account balance ($) to scale risk
+input double   InpBalanceStep       = 100.00;  // Per how much account balance ($) to scale risk
 
 input group "--- Sideways Hybrid Mode Settings ---"
 input bool     InpEnableHybridMode   = true;   // Enable Breakout/Reversion Switch
