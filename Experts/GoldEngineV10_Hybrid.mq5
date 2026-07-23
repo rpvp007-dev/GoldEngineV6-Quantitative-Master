@@ -2032,9 +2032,14 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    // Lock queries for the current candle to exactly once
    g_lastOrderPlacedBarTime = currentBarTime;
 
-   // --- Determine Entry Mode (Fallback / Standard AI regime switch) ---
-   g_aiRegime = rawRegime;
    bool useReversionMode = CalculateReversionMode(currentADX, isMomentumHour, isVolatilitySpike, aiActive, g_aiRegime);
+
+   // Trend Adaptation: if ADX trend guard blocks reversion, convert range strategy to breakout
+   if(!useReversionMode && (g_aiStrategy == "MEAN_REVERSION" || g_aiStrategy == "SCALPING" || g_aiStrategy == "NONE" || g_aiStrategy == ""))
+   {
+      g_aiStrategy = "VOLUME_BREAKOUT";
+      Print("[Trend Adaptation] Converted AI range strategy to VOLUME_BREAKOUT due to high ADX Trend Guard.");
+   }
 
    // Dynamic Risk Scaling factor based on conviction
    double convictionMultiplier = 1.0;
