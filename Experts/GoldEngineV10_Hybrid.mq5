@@ -1869,8 +1869,22 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
               double ch_high = GetChannelHigh(InpChannelLength);
               double ch_low = GetChannelLow(InpChannelLength);
               
-              double donchianSL = (structuralSL > 0.0) ? (MathAbs(prevClose - structuralSL)) : GetStopLossDistance(_Symbol, prevClose, currentATR);
-              double donchianTP = (structuralTP > 0.0) ? (MathAbs(prevClose - structuralTP)) : (donchianSL * InpTargetMult);
+              double donchianSL = GetStopLossDistance(_Symbol, prevClose, currentATR);
+              if(structuralSL > 0.0)
+              {
+                 double suggestedSLDist = MathAbs(prevClose - structuralSL);
+                 double maxCap = 2.0 * g_stopLossDist;
+                 if(suggestedSLDist < donchianSL) suggestedSLDist = donchianSL;
+                 if(suggestedSLDist > maxCap) suggestedSLDist = maxCap;
+                 donchianSL = suggestedSLDist;
+              }
+              double donchianTP = donchianSL * InpTargetMult;
+              if(structuralTP > 0.0)
+              {
+                 double suggestedTPDist = MathAbs(prevClose - structuralTP);
+                 if(suggestedTPDist < donchianSL) suggestedTPDist = donchianSL;
+                 donchianTP = suggestedTPDist;
+              }
               
               double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
               double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -1913,8 +1927,22 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
               double ch_high = GetChannelHigh(InpChannelLength);
               double ch_low = GetChannelLow(InpChannelLength);
               
-              double donchianSL = (structuralSL > 0.0) ? (MathAbs(prevClose - structuralSL)) : GetStopLossDistance(_Symbol, prevClose, currentATR);
-              double donchianTP = (structuralTP > 0.0) ? (MathAbs(prevClose - structuralTP)) : (donchianSL * InpVolumeBreakTPMult);
+              double donchianSL = GetStopLossDistance(_Symbol, prevClose, currentATR);
+              if(structuralSL > 0.0)
+              {
+                 double suggestedSLDist = MathAbs(prevClose - structuralSL);
+                 double maxCap = 2.0 * g_stopLossDist;
+                 if(suggestedSLDist < donchianSL) suggestedSLDist = donchianSL;
+                 if(suggestedSLDist > maxCap) suggestedSLDist = maxCap;
+                 donchianSL = suggestedSLDist;
+              }
+              double donchianTP = donchianSL * InpVolumeBreakTPMult;
+              if(structuralTP > 0.0)
+              {
+                 double suggestedTPDist = MathAbs(prevClose - structuralTP);
+                 if(suggestedTPDist < donchianSL) suggestedTPDist = donchianSL;
+                 donchianTP = suggestedTPDist;
+              }
               
               double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
               double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -1954,8 +1982,22 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
               double curr_ema200 = ema200Val[0];
               double currentVWAP = GetDailyVWAP();
               
-              double pullbackSL = (structuralSL > 0.0) ? (MathAbs(prevClose - structuralSL)) : GetStopLossDistance(_Symbol, prevClose, currentATR);
-              double pullbackTP = (structuralTP > 0.0) ? (MathAbs(prevClose - structuralTP)) : (pullbackSL * InpScalpTPMult);
+              double pullbackSL = GetStopLossDistance(_Symbol, prevClose, currentATR);
+              if(structuralSL > 0.0)
+              {
+                 double suggestedSLDist = MathAbs(prevClose - structuralSL);
+                 double maxCap = 2.0 * g_stopLossDist;
+                 if(suggestedSLDist < pullbackSL) suggestedSLDist = pullbackSL;
+                 if(suggestedSLDist > maxCap) suggestedSLDist = maxCap;
+                 pullbackSL = suggestedSLDist;
+              }
+              double pullbackTP = pullbackSL * InpScalpTPMult;
+              if(structuralTP > 0.0)
+              {
+                 double suggestedTPDist = MathAbs(prevClose - structuralTP);
+                 if(suggestedTPDist < pullbackSL) suggestedTPDist = pullbackSL;
+                 pullbackTP = suggestedTPDist;
+              }
               
               double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
               double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
