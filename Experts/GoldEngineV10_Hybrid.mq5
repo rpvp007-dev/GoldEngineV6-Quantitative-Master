@@ -9,6 +9,111 @@
 
 #include <Trade\Trade.mqh>
 
+//+------------------------------------------------------------------+
+//| Subclass CTrade to implement automatic order retries and updates  |
+//+------------------------------------------------------------------+
+class CTradeSafe : public CTrade
+{
+public:
+   bool Buy(double volume, const string symbol=NULL, double price=0, double sl=0, double tp=0, const string comment="")
+   {
+      int maxRetries = 3;
+      for(int r = 0; r < maxRetries; r++)
+      {
+         if(CTrade::Buy(volume, symbol, price, sl, tp, comment))
+         {
+            uint retcode = ResultRetcode();
+            if(retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_PLACED) return true;
+         }
+         PrintFormat("[Trade Retry] Buy failed (Retcode: %d). Retrying %d/%d in 200ms...", ResultRetcode(), r+1, maxRetries);
+         Sleep(200);
+         price = SymbolInfoDouble(symbol == NULL ? _Symbol : symbol, SYMBOL_ASK);
+      }
+      return false;
+   }
+   
+   bool Sell(double volume, const string symbol=NULL, double price=0, double sl=0, double tp=0, const string comment="")
+   {
+      int maxRetries = 3;
+      for(int r = 0; r < maxRetries; r++)
+      {
+         if(CTrade::Sell(volume, symbol, price, sl, tp, comment))
+         {
+            uint retcode = ResultRetcode();
+            if(retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_PLACED) return true;
+         }
+         PrintFormat("[Trade Retry] Sell failed (Retcode: %d). Retrying %d/%d in 200ms...", ResultRetcode(), r+1, maxRetries);
+         Sleep(200);
+         price = SymbolInfoDouble(symbol == NULL ? _Symbol : symbol, SYMBOL_BID);
+      }
+      return false;
+   }
+   
+   bool BuyLimit(double volume, double price, const string symbol=NULL, double sl=0, double tp=0, ENUM_ORDER_TYPE_TIME type=ORDER_TIME_GTC, datetime expiration=0, const string comment="")
+   {
+      int maxRetries = 3;
+      for(int r = 0; r < maxRetries; r++)
+      {
+         if(CTrade::BuyLimit(volume, price, symbol, sl, tp, type, expiration, comment))
+         {
+            uint retcode = ResultRetcode();
+            if(retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_PLACED) return true;
+         }
+         PrintFormat("[Trade Retry] BuyLimit failed (Retcode: %d). Retrying %d/%d in 200ms...", ResultRetcode(), r+1, maxRetries);
+         Sleep(200);
+      }
+      return false;
+   }
+   
+   bool SellLimit(double volume, double price, const string symbol=NULL, double sl=0, double tp=0, ENUM_ORDER_TYPE_TIME type=ORDER_TIME_GTC, datetime expiration=0, const string comment="")
+   {
+      int maxRetries = 3;
+      for(int r = 0; r < maxRetries; r++)
+      {
+         if(CTrade::SellLimit(volume, price, symbol, sl, tp, type, expiration, comment))
+         {
+            uint retcode = ResultRetcode();
+            if(retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_PLACED) return true;
+         }
+         PrintFormat("[Trade Retry] SellLimit failed (Retcode: %d). Retrying %d/%d in 200ms...", ResultRetcode(), r+1, maxRetries);
+         Sleep(200);
+      }
+      return false;
+   }
+   
+   bool BuyStop(double volume, double price, const string symbol=NULL, double sl=0, double tp=0, ENUM_ORDER_TYPE_TIME type=ORDER_TIME_GTC, datetime expiration=0, const string comment="")
+   {
+      int maxRetries = 3;
+      for(int r = 0; r < maxRetries; r++)
+      {
+         if(CTrade::BuyStop(volume, price, symbol, sl, tp, type, expiration, comment))
+         {
+            uint retcode = ResultRetcode();
+            if(retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_PLACED) return true;
+         }
+         PrintFormat("[Trade Retry] BuyStop failed (Retcode: %d). Retrying %d/%d in 200ms...", ResultRetcode(), r+1, maxRetries);
+         Sleep(200);
+      }
+      return false;
+   }
+   
+   bool SellStop(double volume, double price, const string symbol=NULL, double sl=0, double tp=0, ENUM_ORDER_TYPE_TIME type=ORDER_TIME_GTC, datetime expiration=0, const string comment="")
+   {
+      int maxRetries = 3;
+      for(int r = 0; r < maxRetries; r++)
+      {
+         if(CTrade::SellStop(volume, price, symbol, sl, tp, type, expiration, comment))
+         {
+            uint retcode = ResultRetcode();
+            if(retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_PLACED) return true;
+         }
+         PrintFormat("[Trade Retry] SellStop failed (Retcode: %d). Retrying %d/%d in 200ms...", ResultRetcode(), r+1, maxRetries);
+         Sleep(200);
+      }
+      return false;
+   }
+};
+
 //--- Timeframe Mode Enum
 enum ENUM_TF_MODE {
    TF_AUTO,     // Auto-Detect Chart Timeframe (Default)
@@ -131,7 +236,7 @@ input int      InpMaxHoldMinutes   = 45;       // Custom Maximum Hold Time (Minu
 input double   InpMinATR           = 0.50;     // Custom Minimum ATR (Volatility Limit)
 
 //--- Global Variables / Presets Map
-CTrade         trade;
+CTradeSafe     trade;
 datetime       g_lastBarTime;
 datetime       g_lastOrderPlacedBarTime = 0; // Tracks if order was placed successfully for this candle
 int            g_lastDay = 0;                // Tracks day changes for Daily Bias calculation
