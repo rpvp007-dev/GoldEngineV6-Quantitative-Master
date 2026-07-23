@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, GoldEngine V10"
 #property link      "https://github.com/rpvp007-dev"
-#property version   "18.00"
+#property version   "20.00"
 
 #include <Trade\Trade.mqh>
 
@@ -861,7 +861,7 @@ string ExtractJSONValue(string json, string key)
 }
 
 //+------------------------------------------------------------------+
-//| Central AI client caller with automatic failover (Gemini->Groq)   |
+//| Central AI client caller with user selection & failover          |
 //+------------------------------------------------------------------+
 bool QueryGeminiDirect(string prompt, string &responseText)
 {
@@ -1182,6 +1182,68 @@ void QueryAIActiveTradeManagement()
 }
 
 //+------------------------------------------------------------------+
+//| Extract recent closed trades history under this magic number     |
+//+------------------------------------------------------------------+
+void GetRecentTradesHistory(string &historyStr)
+{
+   historyStr = "";
+   if(!HistorySelect(TimeCurrent() - 7 * 86400, TimeCurrent()))
+   {
+      historyStr = "No trade history available yet.";
+      return;
+   }
+   
+   int totalDeals = HistoryDealsTotal();
+   int count = 0;
+   
+   for(int i = totalDeals - 1; i >= 0 && count < 3; i--)
+   {
+      ulong ticket = HistoryDealGetTicket(i);
+      if(ticket > 0)
+      {
+         string symbol = HistoryDealGetString(ticket, DEAL_SYMBOL);
+         long magic = HistoryDealGetInteger(ticket, DEAL_MAGIC);
+         long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+         
+         if(symbol == _Symbol && magic == InpMagicNumber && (entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY))
+         {
+            long type = HistoryDealGetInteger(ticket, DEAL_TYPE);
+            double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT) + HistoryDealGetDouble(ticket, DEAL_COMMISSION) + HistoryDealGetDouble(ticket, DEAL_SWAP);
+            double price = HistoryDealGetDouble(ticket, DEAL_PRICE);
+            
+            double entryPrice = 0.0;
+            long entryType = -1;
+            ulong positionId = HistoryDealGetInteger(ticket, DEAL_POSITION_ID);
+            
+            for(int j = 0; j < totalDeals; j++)
+            {
+               ulong tEntry = HistoryDealGetTicket(j);
+               if(HistoryDealGetInteger(tEntry, DEAL_POSITION_ID) == positionId && 
+                  (HistoryDealGetInteger(tEntry, DEAL_ENTRY) == DEAL_ENTRY_IN))
+               {
+                  entryPrice = HistoryDealGetDouble(tEntry, DEAL_PRICE);
+                  entryType = HistoryDealGetInteger(tEntry, DEAL_TYPE);
+                  break;
+               }
+            }
+            
+            string typeStr = (entryType == DEAL_TYPE_BUY) ? "BUY" : "SELL";
+            string comment = HistoryDealGetString(ticket, DEAL_COMMENT);
+            
+            historyStr += StringFormat("[Trade %d: %s entry %.2f, exit %.2f, profit=%.2f$, comment='%s'] ", 
+               count + 1, typeStr, entryPrice, price, profit, comment);
+            count++;
+         }
+      }
+   }
+   
+   if(historyStr == "")
+   {
+      historyStr = "No recent closed trades under this magic number.";
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Execute new order placement (Once per candle or on recovery)     |
 //+------------------------------------------------------------------+
 bool ExecuteNewOrderPlacement(datetime currentBarTime)
@@ -1255,15 +1317,26 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          i, iOpen(_Symbol, _Period, i), iHigh(_Symbol, _Period, i), iLow(_Symbol, _Period, i), iClose(_Symbol, _Period, i), iVolume(_Symbol, _Period, i));
    }
    
+   string tradeHistory = "";
+   GetRecentTradesHistory(tradeHistory);
+   
    g_aiStrategy = "NONE";
 
    string prompt = StringFormat(
-      "Gold (XAUUSD) setup analysis. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f. "+
+      "Gold (XAUUSD) setup analysis. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, Spread=%.2f. "+
       "Price History: %s. "+
-      "As a professional quant, evaluate market regime and select the best strategy. "+
-      "Respond strictly with a JSON object containing: 'decision' ('BUY', 'SELL', or 'HOLD'), 'conviction' (integer 0 to 100), 'regime' ('BREAKOUT' or 'REVERSION'), 'strategy' ('BREAKOUT', 'MEAN_REVERSION', 'PULLBACK', 'STRADDLE', or 'SCALPING'), and 'reason' (short 10 words). "+
-      "Example output: { 'decision': 'BUY', 'conviction': 85, 'regime': 'BREAKOUT', 'strategy': 'BREAKOUT', 'reason': 'Momentum breaking high' }.",
-      prevClose, currentADX, currentATR, currentRSI, currentEMA, barsHistory
+      "Recent closed trades history: %s. "+
+      "As a professional self-correcting quant trader, analyze the recent trade outcomes, evaluate current structure, and select the optimal strategy. "+
+      "Respond strictly with a JSON object containing: "+
+      "'decision' ('BUY', 'SELL', or 'HOLD'), "+
+      "'conviction' (integer 0 to 100), "+
+      "'regime' ('BREAKOUT' or 'REVERSION'), "+
+      "'strategy' ('BREAKOUT', 'MEAN_REVERSION', 'PULLBACK', 'STRADDLE', or 'SCALPING'), "+
+      "'stop_loss_price' (double target stop loss price level, or 0.0 to use default), "+
+      "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
+      "'reason' (short 10 words explaining decision and why you adjusted based on recent trades). "+
+      "Example output: { 'decision': 'BUY', 'conviction': 80, 'regime': 'BREAKOUT', 'strategy': 'BREAKOUT', 'stop_loss_price': 4102.50, 'take_profit_price': 4118.00, 'reason': 'Adjusted to wider SL after recent breakout fakeout' }.",
+      prevClose, currentADX, currentATR, currentRSI, currentEMA, spread, barsHistory, tradeHistory
    );
 
    bool aiActive = false;
@@ -1331,154 +1404,190 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       if(g_aiConviction < 80)
       {
          convictionMultiplier = 0.50;
-      }
-   }
+       }
+    }
 
-   double finalLotSize = NormalizeDouble(g_lotSize * convictionMultiplier, 2);
-   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   if(finalLotSize < minLot) finalLotSize = minLot;
+    double finalLotSize = NormalizeDouble(g_lotSize * convictionMultiplier, 2);
+    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+    if(finalLotSize < minLot) finalLotSize = minLot;
 
-   // --- Execute Specific Strategy if Selected by AI ---
-   if(aiActive)
-   {
-      if(g_aiStrategy == "SCALPING")
-      {
-         double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         double scalpingSL = NormalizeDouble(0.60, _Digits);
-         double scalpingTP = NormalizeDouble(0.80, _Digits);
-         
-         if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
-         {
-            double slPrice = NormalizeDouble(currentBid - scalpingSL, _Digits);
-            double tpPrice = NormalizeDouble(currentBid + scalpingTP, _Digits);
-            trade.Buy(finalLotSize, _Symbol, currentAsk, slPrice, tpPrice, "AI Scalp BUY");
-            return true;
-         }
-         else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
-         {
-            double slPrice = NormalizeDouble(currentAsk + scalpingSL, _Digits);
-            double tpPrice = NormalizeDouble(currentAsk - scalpingTP, _Digits);
-            trade.Sell(finalLotSize, _Symbol, currentBid, slPrice, tpPrice, "AI Scalp SELL");
-            return true;
-         }
-         return false;
-      }
-      
-      if(g_aiStrategy == "PULLBACK")
-      {
-         double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         double pullbackSL = NormalizeDouble(0.80, _Digits);
-         double pullbackTP = NormalizeDouble(2.00, _Digits);
-         
-         if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
-         {
-            double limitPrice = NormalizeDouble(currentEMA, _Digits);
-            if(MathAbs(currentBid - currentEMA) <= 0.30)
-            {
-               double slPrice = NormalizeDouble(currentBid - pullbackSL, _Digits);
-               double tpPrice = NormalizeDouble(currentBid + pullbackTP, _Digits);
-               trade.Buy(finalLotSize, _Symbol, currentAsk, slPrice, tpPrice, "AI Pullback BUY Market");
-            }
-            else
-            {
-               double slPrice = NormalizeDouble(limitPrice - pullbackSL, _Digits);
-               double tpPrice = NormalizeDouble(limitPrice + pullbackTP, _Digits);
-               trade.BuyLimit(finalLotSize, limitPrice, _Symbol, slPrice, tpPrice, ORDER_TIME_GTC, 0, "AI Pullback BUY Limit");
-            }
-            return true;
-         }
-         else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
-         {
-            double limitPrice = NormalizeDouble(currentEMA, _Digits);
-            if(MathAbs(currentAsk - currentEMA) <= 0.30)
-            {
-               double slPrice = NormalizeDouble(currentAsk + pullbackSL, _Digits);
-               double tpPrice = NormalizeDouble(currentAsk - pullbackTP, _Digits);
-               trade.Sell(finalLotSize, _Symbol, currentBid, slPrice, tpPrice, "AI Pullback SELL Market");
-            }
-            else
-            {
-               double slPrice = NormalizeDouble(limitPrice + pullbackSL, _Digits);
-               double tpPrice = NormalizeDouble(limitPrice - pullbackTP, _Digits);
-               trade.SellLimit(finalLotSize, limitPrice, _Symbol, slPrice, tpPrice, ORDER_TIME_GTC, 0, "AI Pullback SELL Limit");
-            }
-            return true;
-         }
-         return false;
-      }
-      
-      if(g_aiStrategy == "STRADDLE")
-      {
-         double buyStopPrice  = NormalizeDouble(prevHigh + g_priceOffset + spread, _Digits);
-         double buySL         = NormalizeDouble(buyStopPrice - g_stopLossDist, _Digits);
-         double buyTP         = (g_takeProfitDist > 0.0) ? NormalizeDouble(buyStopPrice + g_takeProfitDist, _Digits) : 0.0;
-         
-         double sellStopPrice = NormalizeDouble(prevLow - g_priceOffset, _Digits);
-         double sellSL        = NormalizeDouble(sellStopPrice + g_stopLossDist, _Digits);
-         double sellTP        = (g_takeProfitDist > 0.0) ? NormalizeDouble(sellStopPrice - g_takeProfitDist, _Digits) : 0.0;
-         
-         if(g_dailySentiment != "SELL_ONLY")
-         {
-            trade.BuyStop(finalLotSize, buyStopPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "AI Straddle BUY");
-         }
-         if(g_dailySentiment != "BUY_ONLY")
-         {
-            trade.SellStop(finalLotSize, sellStopPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AI Straddle SELL");
-         }
-         return true;
-      }
-   }
+    // --- Parse AI Suggested Structural Stop Loss and Take Profit ---
+    double structuralSL = 0.0;
+    double structuralTP = 0.0;
+    if(aiActive)
+    {
+       structuralSL = StringToDouble(ExtractJSONValue(responseText, "stop_loss_price"));
+       structuralTP = StringToDouble(ExtractJSONValue(responseText, "take_profit_price"));
+    }
 
-   // --- Determine Entry Mode (Fallback / Standard AI regime switch) ---
-   bool useReversionMode = false;
-   if(InpEnableHybridMode)
-   {
-      if(aiActive)
-      {
-         useReversionMode = (rawRegime == "REVERSION");
-      }
-      else
-      {
-         // Fallback to local indicators
-         if(InpUseSessionHours && !isMomentumHour)
-         {
-            useReversionMode = true;
-            if(isVolatilitySpike)
-            {
-               useReversionMode = false;
-            }
-         }
-         else if(currentADX < g_minADX)
-         {
-            useReversionMode = true;
-         }
-      }
-   }
+    // --- Execute Specific Strategy if Selected by AI ---
+    if(aiActive)
+    {
+       if(g_aiStrategy == "SCALPING")
+       {
+          double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+          double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+          
+          double scalpingSL = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(currentBid - 0.60, _Digits);
+          double scalpingTP = (structuralTP > 0.0) ? structuralTP : NormalizeDouble(currentBid + 0.80, _Digits);
+          
+          if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+          {
+             // Validate and cap Stop Loss
+             double maxRiskSL = NormalizeDouble(currentBid - (2.0 * g_stopLossDist), _Digits);
+             if(scalpingSL < maxRiskSL) scalpingSL = maxRiskSL; // Safety Cap
+             
+             trade.Buy(finalLotSize, _Symbol, currentAsk, scalpingSL, scalpingTP, "AI Scalp BUY");
+             return true;
+          }
+          else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+          {
+             scalpingSL = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(currentAsk + 0.60, _Digits);
+             scalpingTP = (structuralTP > 0.0) ? structuralTP : NormalizeDouble(currentAsk - 0.80, _Digits);
+             
+             double maxRiskSL = NormalizeDouble(currentAsk + (2.0 * g_stopLossDist), _Digits);
+             if(scalpingSL > maxRiskSL) scalpingSL = maxRiskSL; // Safety Cap
+             
+             trade.Sell(finalLotSize, _Symbol, currentBid, scalpingSL, scalpingTP, "AI Scalp SELL");
+             return true;
+          }
+          return false;
+       }
+       
+       if(g_aiStrategy == "PULLBACK")
+       {
+          double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+          double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+          
+          if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+          {
+             double limitPrice = NormalizeDouble(currentEMA, _Digits);
+             double pullbackSL = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(limitPrice - 0.80, _Digits);
+             double pullbackTP = (structuralTP > 0.0) ? structuralTP : NormalizeDouble(limitPrice + 2.00, _Digits);
+             
+             // Risk Cap
+             double maxRiskSL = NormalizeDouble(limitPrice - (2.0 * g_stopLossDist), _Digits);
+             if(pullbackSL < maxRiskSL) pullbackSL = maxRiskSL;
+             
+             if(MathAbs(currentBid - currentEMA) <= 0.30)
+             {
+                trade.Buy(finalLotSize, _Symbol, currentAsk, pullbackSL, pullbackTP, "AI Pullback BUY Market");
+             }
+             else
+             {
+                trade.BuyLimit(finalLotSize, limitPrice, _Symbol, pullbackSL, pullbackTP, ORDER_TIME_GTC, 0, "AI Pullback BUY Limit");
+             }
+             return true;
+          }
+          else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+          {
+             double limitPrice = NormalizeDouble(currentEMA, _Digits);
+             double pullbackSL = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(limitPrice + 0.80, _Digits);
+             double pullbackTP = (structuralTP > 0.0) ? structuralTP : NormalizeDouble(limitPrice - 2.00, _Digits);
+             
+             // Risk Cap
+             double maxRiskSL = NormalizeDouble(limitPrice + (2.0 * g_stopLossDist), _Digits);
+             if(pullbackSL > maxRiskSL) pullbackSL = maxRiskSL;
+             
+             if(MathAbs(currentAsk - currentEMA) <= 0.30)
+             {
+                trade.Sell(finalLotSize, _Symbol, currentBid, pullbackSL, pullbackTP, "AI Pullback SELL Market");
+             }
+             else
+             {
+                trade.SellLimit(finalLotSize, limitPrice, _Symbol, pullbackSL, pullbackTP, ORDER_TIME_GTC, 0, "AI Pullback SELL Limit");
+             }
+             return true;
+          }
+          return false;
+       }
+       
+       if(g_aiStrategy == "STRADDLE")
+       {
+          double buyStopPrice  = NormalizeDouble(prevHigh + g_priceOffset + spread, _Digits);
+          double buySL         = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(buyStopPrice - g_stopLossDist, _Digits);
+          double buyTP         = (structuralTP > 0.0) ? structuralTP : ((g_takeProfitDist > 0.0) ? NormalizeDouble(buyStopPrice + g_takeProfitDist, _Digits) : 0.0);
+          
+          // Risk Cap
+          double maxBuyRiskSL = NormalizeDouble(buyStopPrice - (2.0 * g_stopLossDist), _Digits);
+          if(buySL < maxBuyRiskSL) buySL = maxBuyRiskSL;
+          
+          double sellStopPrice = NormalizeDouble(prevLow - g_priceOffset, _Digits);
+          double sellSL        = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(sellStopPrice + g_stopLossDist, _Digits);
+          double sellTP        = (structuralTP > 0.0) ? structuralTP : ((g_takeProfitDist > 0.0) ? NormalizeDouble(sellStopPrice - g_takeProfitDist, _Digits) : 0.0);
+          
+          // Risk Cap
+          double maxSellRiskSL = NormalizeDouble(sellStopPrice + (2.0 * g_stopLossDist), _Digits);
+          if(sellSL > maxSellRiskSL) sellSL = maxSellRiskSL;
+          
+          if(g_dailySentiment != "SELL_ONLY")
+          {
+             trade.BuyStop(finalLotSize, buyStopPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "AI Straddle BUY");
+          }
+          if(g_dailySentiment != "BUY_ONLY")
+          {
+             trade.SellStop(finalLotSize, sellStopPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AI Straddle SELL");
+          }
+          return true;
+       }
+    }
 
-   // Place Orders in accordance with Daily Sentiment Anchor
-   if(useReversionMode)
-   {
-      // --- SIDEWAYS RANGE MODE (Limit Orders) ---
-      double reversionOffset = (InpTimeframeMode == TF_M1 || (InpTimeframeMode == TF_AUTO && _Period == PERIOD_M1)) ? 0.08 : 0.15;
-      
-      bool placeBuy = (g_dailySentiment != "SELL_ONLY") && (!aiActive || StringFind(g_aiDecision, "BUY") >= 0);
-      bool placeSell = (g_dailySentiment != "BUY_ONLY") && (!aiActive || StringFind(g_aiDecision, "SELL") >= 0);
+    // --- Determine Entry Mode (Fallback / Standard AI regime switch) ---
+    bool useReversionMode = false;
+    if(InpEnableHybridMode)
+    {
+       if(aiActive)
+       {
+          useReversionMode = (rawRegime == "REVERSION");
+       }
+       else
+       {
+          // Fallback to local indicators
+          if(InpUseSessionHours && !isMomentumHour)
+          {
+             useReversionMode = true;
+             if(isVolatilitySpike)
+             {
+                useReversionMode = false;
+             }
+          }
+          else if(currentADX < g_minADX)
+          {
+             useReversionMode = true;
+          }
+       }
+    }
+
+    // Place Orders in accordance with Daily Sentiment Anchor
+    if(useReversionMode)
+    {
+       // --- SIDEWAYS RANGE MODE (Limit Orders) ---
+       double reversionOffset = (InpTimeframeMode == TF_M1 || (InpTimeframeMode == TF_AUTO && _Period == PERIOD_M1)) ? 0.08 : 0.15;
+       
+       bool placeBuy = (g_dailySentiment != "SELL_ONLY") && (!aiActive || StringFind(g_aiDecision, "BUY") >= 0);
+       bool placeSell = (g_dailySentiment != "BUY_ONLY") && (!aiActive || StringFind(g_aiDecision, "SELL") >= 0);
       
       if(placeBuy)
       {
          double buyLimitPrice  = NormalizeDouble(prevLow - reversionOffset, _Digits);
-         double buySL          = NormalizeDouble(buyLimitPrice - g_stopLossDist, _Digits);
-         double buyTP          = (g_takeProfitDist > 0.0) ? NormalizeDouble(buyLimitPrice + g_takeProfitDist, _Digits) : 0.0;
+         double buySL          = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(buyLimitPrice - g_stopLossDist, _Digits);
+         double buyTP          = (structuralTP > 0.0) ? structuralTP : ((g_takeProfitDist > 0.0) ? NormalizeDouble(buyLimitPrice + g_takeProfitDist, _Digits) : 0.0);
+         
+         double maxRiskSL = NormalizeDouble(buyLimitPrice - (2.0 * g_stopLossDist), _Digits);
+         if(buySL < maxRiskSL) buySL = maxRiskSL;
+         
          trade.BuyLimit(finalLotSize, buyLimitPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "AI Buy Limit Reversion");
       }
       
       if(placeSell)
       {
          double sellLimitPrice = NormalizeDouble(prevHigh + reversionOffset, _Digits);
-         double sellSL         = NormalizeDouble(sellLimitPrice + g_stopLossDist, _Digits);
-         double sellTP         = (g_takeProfitDist > 0.0) ? NormalizeDouble(sellLimitPrice - g_takeProfitDist, _Digits) : 0.0;
+         double sellSL         = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(sellLimitPrice + g_stopLossDist, _Digits);
+         double sellTP         = (structuralTP > 0.0) ? structuralTP : ((g_takeProfitDist > 0.0) ? NormalizeDouble(sellLimitPrice - g_takeProfitDist, _Digits) : 0.0);
+         
+         double maxRiskSL = NormalizeDouble(sellLimitPrice + (2.0 * g_stopLossDist), _Digits);
+         if(sellSL > maxRiskSL) sellSL = maxRiskSL;
+         
          trade.SellLimit(finalLotSize, sellLimitPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AI Sell Limit Reversion");
       }
       
@@ -1541,8 +1650,11 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       if(allowBuy)
       {
          double buyStopPrice  = NormalizeDouble(prevHigh + g_priceOffset + spread, _Digits);
-         double buySL         = NormalizeDouble(buyStopPrice - g_stopLossDist, _Digits);
-         double buyTP         = (g_takeProfitDist > 0.0) ? NormalizeDouble(buyStopPrice + g_takeProfitDist, _Digits) : 0.0;
+         double buySL         = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(buyStopPrice - g_stopLossDist, _Digits);
+         double buyTP         = (structuralTP > 0.0) ? structuralTP : ((g_takeProfitDist > 0.0) ? NormalizeDouble(buyStopPrice + g_takeProfitDist, _Digits) : 0.0);
+         
+         double maxRiskSL = NormalizeDouble(buyStopPrice - (2.0 * g_stopLossDist), _Digits);
+         if(buySL < maxRiskSL) buySL = maxRiskSL;
          
          trade.BuyStop(finalLotSize, buyStopPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "AI Buy Stop Breakout");
          orderPlaced = true;
@@ -1551,8 +1663,11 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       if(allowSell)
       {
          double sellStopPrice = NormalizeDouble(prevLow - g_priceOffset, _Digits);
-         double sellSL        = NormalizeDouble(sellStopPrice + g_stopLossDist, _Digits);
-         double sellTP        = (g_takeProfitDist > 0.0) ? NormalizeDouble(sellStopPrice - g_takeProfitDist, _Digits) : 0.0;
+         double sellSL        = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(sellStopPrice + g_stopLossDist, _Digits);
+         double sellTP        = (structuralTP > 0.0) ? structuralTP : ((g_takeProfitDist > 0.0) ? NormalizeDouble(sellStopPrice - g_takeProfitDist, _Digits) : 0.0);
+         
+         double maxRiskSL = NormalizeDouble(sellStopPrice + (2.0 * g_stopLossDist), _Digits);
+         if(sellSL > maxRiskSL) sellSL = maxRiskSL;
          
          trade.SellStop(finalLotSize, sellStopPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AI Sell Stop Breakout");
          orderPlaced = true;
