@@ -209,6 +209,7 @@ bool CalculateReversionMode(double adxVal, bool isMomHour, bool isVolSpike, bool
    if(InpUseSessionHours && !isMomHour)
    {
       if(isVolSpike) return false;
+      if(adxVal > 25.0) return false; // ADX Trend Guard: do not reversion trade in strong trends
       return true;
    }
    
@@ -888,7 +889,7 @@ void ManageCandleCloseLossCutting(bool reversionModeActive)
                   continue;
                }
                
-               if(InpEnableCandleTrail)
+               if(InpEnableCandleTrail && !reversionModeActive)
                {
                   double targetSL = NormalizeDouble(prevLow - g_candleTrailBuffer, _Digits);
                   if(targetSL > currentSL || currentSL == 0.0)
@@ -913,7 +914,7 @@ void ManageCandleCloseLossCutting(bool reversionModeActive)
                   continue;
                }
                
-               if(InpEnableCandleTrail)
+               if(InpEnableCandleTrail && !reversionModeActive)
                {
                   double targetSL = NormalizeDouble(prevHigh + g_candleTrailBuffer, _Digits);
                   if(targetSL < currentSL || currentSL == 0.0)
@@ -2461,7 +2462,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
        {
           double rawBuyPrice = (ArraySize(nearestLows) > 0) ? (nearestLows[0] + InpLimitOffset) : (prevLow - reversionOffset);
           double buyLimitPrice = (InpPriceRoundStep > 0.0) ? RoundToStep(rawBuyPrice, InpPriceRoundStep) : NormalizeDouble(rawBuyPrice, _Digits);
-          double buySL          = (structuralSL > 0.0 && structuralSL < buyLimitPrice) ? structuralSL : NormalizeDouble(buyLimitPrice - g_stopLossDist, _Digits);
+          // Strictly use ATR-based Stop Loss for range limits (ignore tight AI structural stops)
+          double buySL          = NormalizeDouble(buyLimitPrice - g_stopLossDist, _Digits);
           
           // Buy TP defaults to the target Sell Limit price (front-run Golden Magnet)
           double rawBuyTPPrice = (ArraySize(nearestHighs) > 0) ? (nearestHighs[0] - InpLimitOffset) : 0.0;
@@ -2487,7 +2489,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
        {
           double rawSellPrice = (ArraySize(nearestHighs) > 0) ? (nearestHighs[0] - InpLimitOffset) : (prevHigh + reversionOffset);
           double sellLimitPrice = (InpPriceRoundStep > 0.0) ? RoundToStep(rawSellPrice, InpPriceRoundStep) : NormalizeDouble(rawSellPrice, _Digits);
-          double sellSL         = (structuralSL > 0.0 && structuralSL > sellLimitPrice) ? structuralSL : NormalizeDouble(sellLimitPrice + g_stopLossDist, _Digits);
+          // Strictly use ATR-based Stop Loss for range limits (ignore tight AI structural stops)
+          double sellSL         = NormalizeDouble(sellLimitPrice + g_stopLossDist, _Digits);
           
           // Sell TP defaults to the target Buy Limit price (front-run Aqua Magnet)
           double rawSellTPPrice = (ArraySize(nearestLows) > 0) ? (nearestLows[0] + InpLimitOffset) : 0.0;
