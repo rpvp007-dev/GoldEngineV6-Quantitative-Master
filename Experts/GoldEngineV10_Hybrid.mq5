@@ -2039,13 +2039,23 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          return false; 
       }
       
-      // Scale position size dynamically:
-      // High Conviction (80+): 100% size
-      // Medium Conviction (50-79): 50% size
-      if(g_aiConviction < 80)
+      // Scale position size dynamically based on conviction:
+      if(g_aiConviction >= 90)
+      {
+         convictionMultiplier = 1.00;
+      }
+      else if(g_aiConviction >= 80)
+      {
+         convictionMultiplier = 0.80;
+      }
+      else if(g_aiConviction >= 70)
       {
          convictionMultiplier = 0.50;
-       }
+      }
+      else
+      {
+         convictionMultiplier = 0.30;
+      }
     }
 
     double finalLotSize = NormalizeDouble(g_lotSize * convictionMultiplier, 2);
