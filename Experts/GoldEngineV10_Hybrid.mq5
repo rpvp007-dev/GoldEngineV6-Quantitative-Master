@@ -1958,7 +1958,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "Recent closed trades history: %s. "+
       "Untested Price Magnets (Liquidity Pools): %s. "+
       "As a professional self-correcting quant trader, analyze the macro trend, price history, candle patterns (like Hammer/Pin Bar wicks representing rejection at support/resistance floors), and GNN magnets. "+
-      "Instructions: During strong trends, trade in the direction of the trend. Identify wick rejections (e.g., Hammers at Support, Shooting Stars at Resistance) and adjust your decision or stop loss buffer to let wicks breathe and reverse instead of being stopped out prematurely. "+
+      "Instructions: 1. During strong trends, trade in the direction of the trend. 2. If the price has deeply retraced to a macro GNN support floor (like Aqua lines) and you detect a bullish rejection (Hammers/long lower shadows), you are highly encouraged to issue a LONG_TERM BUY swing trade targeting the Golden GNN resistance ceiling (50+ points above) with a wide Stop Loss below the support floor. 3. Conversely, if price has spiked to a Golden resistance ceiling and shows bearish rejection (Shooting Stars), issue a LONG_TERM SELL swing trade targeting the Aqua support floor. LONG_TERM trades bypass all time decay exits. Identify wick rejections and adjust your decision or stop loss buffer to let wicks breathe. "+
       "Respond strictly with a JSON object containing: "+
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
@@ -1968,7 +1968,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "'stop_loss_price' (double target stop loss price level, or 0.0 to use default), "+
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words explaining decision and why you adjusted based on recent trades). "+
-      "Example output: { 'decision': 'SELL', 'conviction': 90, 'regime': 'BREAKOUT', 'strategy': 'VOLUME_BREAKOUT', 'horizon': 'LONG_TERM', 'stop_loss_price': 4102.50, 'take_profit_price': 4080.00, 'reason': 'Strong bearish trend below VWAP targeting Aqua liquidity pool' }.",
+      "Example output: { 'decision': 'BUY', 'conviction': 95, 'regime': 'REVERSION', 'strategy': 'MEAN_REVERSION', 'horizon': 'LONG_TERM', 'stop_loss_price': 4065.00, 'take_profit_price': 4125.00, 'reason': 'Deep retracement to Aqua support with Hammer wick rejection' }.",
       prevClose, trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, candlePatterns, tradeHistory, magnetDesc
    );
 
