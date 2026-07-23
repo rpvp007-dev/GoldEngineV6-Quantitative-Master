@@ -181,6 +181,8 @@ int            g_aiConviction = 0;
 string         g_aiReason = "Awaiting setup...";
 string         g_aiStrategy = "NONE";
 string         g_tradeHorizon = "SHORT_TERM"; // SHORT_TERM or LONG_TERM holding time horizon
+string         g_upcomingNews = "None"; // Holds parsed news for the current day
+datetime       g_lastCalendarFetchTime = 0; // Tracks when we last fetched calendar
 
 //+------------------------------------------------------------------+
 //| Determine higher timeframe for trend alignment                  |
@@ -1290,6 +1292,93 @@ void GetRecentTradesHistory(string &historyStr)
 }
 
 //+------------------------------------------------------------------+
+//| Fetch ForexFactory Economic Calendar and parse USD news          |
+//+------------------------------------------------------------------+
+string GetXMLNodeValue(string xml, string tag)
+{
+   string startTag = "<" + tag + ">";
+   string endTag = "</" + tag + ">";
+   
+   int startIdx = StringFind(xml, startTag);
+   if(startIdx < 0) return "";
+   
+   int endIdx = StringFind(xml, endTag, startIdx);
+   if(endIdx < 0) return "";
+   
+   int valStart = startIdx + StringLen(startTag);
+   return StringSubstr(xml, valStart, endIdx - valStart);
+}
+
+void FetchEconomicCalendar()
+{
+   // Only fetch once every 6 hours to prevent rate limits
+   if(g_lastCalendarFetchTime > 0 && TimeCurrent() - g_lastCalendarFetchTime < 21600 && g_upcomingNews != "None")
+   {
+      return;
+   }
+   
+   g_lastCalendarFetchTime = TimeCurrent();
+   
+   string url = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml";
+   string headers = "";
+   char post[];
+   char result[];
+   string responseHeaders = "";
+   
+   ResetLastError();
+   int res = WebRequest("GET", url, headers, 5000, post, result, responseHeaders);
+   if(res != 200)
+   {
+      Print("[Calendar Fail] HTTP Status: ", res, ", Error code: ", GetLastError());
+      return;
+   }
+   
+   string xml = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+   
+   // Get today's date formatted as mm-dd-yyyy (matches ForexFactory XML date format)
+   MqlDateTime dt;
+   TimeCurrent(dt);
+   string todayStr = StringFormat("%02d-%02d-%04d", dt.mon, dt.day, dt.year);
+   
+   g_upcomingNews = "";
+   int pos = 0;
+   
+   while(true)
+   {
+      int startEvent = StringFind(xml, "<event>", pos);
+      if(startEvent < 0) break;
+      int endEvent = StringFind(xml, "</event>", startEvent);
+      if(endEvent < 0) break;
+      
+      string eventXml = StringSubstr(xml, startEvent, endEvent - startEvent);
+      pos = endEvent + 8;
+      
+      // Parse fields
+      string title = GetXMLNodeValue(eventXml, "title");
+      string country = GetXMLNodeValue(eventXml, "country");
+      string date = GetXMLNodeValue(eventXml, "date");
+      string time = GetXMLNodeValue(eventXml, "time");
+      string impact = GetXMLNodeValue(eventXml, "impact");
+      string forecast = GetXMLNodeValue(eventXml, "forecast");
+      string previous = GetXMLNodeValue(eventXml, "previous");
+      
+      // Filter: USD High/Medium impact events for today
+      if(country == "USD" && (impact == "High" || impact == "Medium") && date == todayStr)
+      {
+         if(g_upcomingNews != "") g_upcomingNews += ", ";
+         g_upcomingNews += StringFormat("%s at %s (Forecast: %s, Previous: %s)", title, time, forecast, previous);
+      }
+   }
+   
+   if(g_upcomingNews == "")
+   {
+      g_upcomingNews = "None";
+   }
+   
+   Print("[Calendar Success] USD Today's News: ", g_upcomingNews);
+}
+
+//+------------------------------------------------------------------+
 //| Get Volume SMA and anchor-free Daily VWAP calculation           |
 //+------------------------------------------------------------------+
 double GetVolumeSMA(int period)
@@ -1635,10 +1724,11 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
 
    string prompt = StringFormat(
       "Gold (XAUUSD) setup analysis. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
+      "Upcoming High-Impact News today: %s. "+
       "Price History: %s. "+
       "Recent closed trades history: %s. "+
       "Untested Price Magnets (Liquidity Pools): %s. "+
-      "As a professional self-correcting quant trader, analyze the recent trade outcomes, evaluate current structure and structural price magnets, select the optimal strategy, and classify the hold time horizon (short quick trades vs long trend trades). "+
+      "As a professional self-correcting quant trader, analyze the recent trade outcomes, evaluate current structure, news events, and structural price magnets, select the optimal strategy, and classify the hold time horizon (short quick trades vs long trend trades). "+
       "Respond strictly with a JSON object containing: "+
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
@@ -1649,7 +1739,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words explaining decision and why you adjusted based on recent trades). "+
       "Example output: { 'decision': 'BUY', 'conviction': 80, 'regime': 'BREAKOUT', 'strategy': 'VOLUME_BREAKOUT', 'horizon': 'LONG_TERM', 'stop_loss_price': 4102.50, 'take_profit_price': 4118.00, 'reason': 'Volume breakout above Donchian channel with volume surge' }.",
-      prevClose, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, barsHistory, tradeHistory, magnetDesc
+      prevClose, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, tradeHistory, magnetDesc
    );
 
    bool aiActive = false;
@@ -2518,7 +2608,8 @@ int OnInit()
    // 4. Test AI Engines connection live on startup
    TestAIEngines();
    
-   // 5. Establish initial Daily Sentiment Anchor
+   // 5. Fetch Economic Calendar and establish initial Daily Sentiment Anchor
+   FetchEconomicCalendar();
    QueryAIDailySentiment();
    
    MqlDateTime dt;
@@ -2620,6 +2711,7 @@ void OnTick()
       if(dt.day != g_lastDay)
       {
          g_lastDay = dt.day;
+         FetchEconomicCalendar();
          QueryAIDailySentiment();
       }
       
