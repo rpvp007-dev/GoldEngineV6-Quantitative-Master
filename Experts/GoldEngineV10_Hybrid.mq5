@@ -779,7 +779,7 @@ void LoadTimeframePresets()
 //+------------------------------------------------------------------+
 //| Function to delete unexecuted pending orders                     |
 //+------------------------------------------------------------------+
-void CancelPendingOrders()
+void CancelPendingOrdersEx(bool cancelLimits)
 {
    for(int i = OrdersTotal() - 1; i >= 0; i--)
    {
@@ -789,13 +789,62 @@ void CancelPendingOrders()
          if(OrderGetString(ORDER_SYMBOL) == _Symbol && OrderGetInteger(ORDER_MAGIC) == InpMagicNumber)
          {
             ENUM_ORDER_TYPE type = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
-            if(type == ORDER_TYPE_BUY_STOP || type == ORDER_TYPE_SELL_STOP ||
-               type == ORDER_TYPE_BUY_LIMIT || type == ORDER_TYPE_SELL_LIMIT)
+            if(type == ORDER_TYPE_BUY_STOP || type == ORDER_TYPE_SELL_STOP)
+            {
+               trade.OrderDelete(ticket);
+            }
+            else if(cancelLimits && (type == ORDER_TYPE_BUY_LIMIT || type == ORDER_TYPE_SELL_LIMIT))
             {
                trade.OrderDelete(ticket);
             }
          }
       }
+   }
+}
+
+void VerifyAndSyncSidewaysLimits(double targetBuyPrice, double targetSellPrice)
+{
+   bool buyLimitExists = false;
+   bool sellLimitExists = false;
+   double currentBuyLimitPrice = 0.0;
+   double currentSellLimitPrice = 0.0;
+   ulong buyTicket = 0;
+   ulong sellTicket = 0;
+   
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = OrderGetTicket(i);
+      if(ticket > 0)
+      {
+         if(OrderGetString(ORDER_SYMBOL) == _Symbol && OrderGetInteger(ORDER_MAGIC) == InpMagicNumber)
+         {
+            ENUM_ORDER_TYPE type = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+            if(type == ORDER_TYPE_BUY_LIMIT)
+            {
+               buyLimitExists = true;
+               currentBuyLimitPrice = OrderGetDouble(ORDER_PRICE_OPEN);
+               buyTicket = ticket;
+            }
+            else if(type == ORDER_TYPE_SELL_LIMIT)
+            {
+               sellLimitExists = true;
+               currentSellLimitPrice = OrderGetDouble(ORDER_PRICE_OPEN);
+               sellTicket = ticket;
+            }
+         }
+      }
+   }
+   
+   // If target price shifted, cancel the misaligned order
+   if(buyLimitExists && targetBuyPrice > 0.0 && MathAbs(currentBuyLimitPrice - targetBuyPrice) > 0.05)
+   {
+      trade.OrderDelete(buyTicket);
+      g_lastOrderPlacedBarTime = 0; // force re-evaluation
+   }
+   if(sellLimitExists && targetSellPrice > 0.0 && MathAbs(currentSellLimitPrice - targetSellPrice) > 0.05)
+   {
+      trade.OrderDelete(sellTicket);
+      g_lastOrderPlacedBarTime = 0; // force re-evaluation
    }
 }
 
@@ -2803,7 +2852,7 @@ void OnTick()
    // Check if EA is paused by the on-chart button
    if(!g_eaRunning)
    {
-      CancelPendingOrders();
+      CancelPendingOrdersEx(true);
       return;
    }
 
@@ -2824,7 +2873,28 @@ void OnTick()
       }
       
       g_lastBarTime = currentBarTime;
-      CancelPendingOrders();
+      CancelPendingOrdersEx(!useReversionMode);
+   }
+
+   if(g_eaRunning)
+   {
+      if(useReversionMode)
+      {
+         double nearestHighs[];
+         double nearestLows[];
+         string dummy = "";
+         GetUntestedMagnets(nearestHighs, nearestLows, dummy);
+         
+         double targetBuy = (ArraySize(nearestLows) > 0) ? nearestLows[0] : 0.0;
+         double targetSell = (ArraySize(nearestHighs) > 0) ? nearestHighs[0] : 0.0;
+         
+         VerifyAndSyncSidewaysLimits(targetBuy, targetSell);
+      }
+      else
+      {
+         // Clean up sideways limits if we transitioned to trending mode
+         CancelPendingOrdersEx(true);
+      }
    }
 
    // Place orders if not yet successfully processed for this candle and no open orders exist
