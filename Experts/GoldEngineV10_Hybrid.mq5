@@ -1033,6 +1033,7 @@ void VerifyAndSyncSidewaysLimits(double targetBuyPrice, double targetSellPrice)
 //+------------------------------------------------------------------+
 void ManageCandleCloseLossCutting(bool reversionModeActive)
 {
+   bool isSidewaysRegime = reversionModeActive || IsInsideGNNChannel();
    double stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
    for(int i = PositionsTotal() - 1; i >= 0; i--)
@@ -1053,14 +1054,14 @@ void ManageCandleCloseLossCutting(bool reversionModeActive)
             
             if(type == POSITION_TYPE_BUY)
             {
-               if(InpEnableRejectionExit && prevClose < prevOpen && !reversionModeActive && g_tradeHorizon != "LONG_TERM")
+               if(InpEnableRejectionExit && prevClose < prevOpen && !isSidewaysRegime && g_tradeHorizon != "LONG_TERM")
                {
                   Print(StringFormat("[V10 SOFT STOP] Closing BUY ticket #%I64u due to Bearish Close.", ticket));
                   trade.PositionClose(ticket);
                   continue;
                }
                
-               if(InpEnableCandleTrail && !reversionModeActive && g_tradeHorizon != "LONG_TERM")
+               if(InpEnableCandleTrail && !isSidewaysRegime && g_tradeHorizon != "LONG_TERM")
                {
                   double targetSL = NormalizeDouble(prevLow - g_candleTrailBuffer, _Digits);
                   if(targetSL > currentSL || currentSL == 0.0)
@@ -1078,14 +1079,14 @@ void ManageCandleCloseLossCutting(bool reversionModeActive)
             }
             else if(type == POSITION_TYPE_SELL)
             {
-               if(InpEnableRejectionExit && prevClose > prevOpen && !reversionModeActive && g_tradeHorizon != "LONG_TERM")
+               if(InpEnableRejectionExit && prevClose > prevOpen && !isSidewaysRegime && g_tradeHorizon != "LONG_TERM")
                {
                   Print(StringFormat("[V10 SOFT STOP] Closing SELL ticket #%I64u due to Bullish Close.", ticket));
                   trade.PositionClose(ticket);
                   continue;
                }
                
-               if(InpEnableCandleTrail && !reversionModeActive && g_tradeHorizon != "LONG_TERM")
+               if(InpEnableCandleTrail && !isSidewaysRegime && g_tradeHorizon != "LONG_TERM")
                {
                   double targetSL = NormalizeDouble(prevHigh + g_candleTrailBuffer, _Digits);
                   if(targetSL < currentSL || currentSL == 0.0)
@@ -2104,7 +2105,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "Recent closed trades history: %s. "+
       "Untested Price Magnets (Liquidity Pools): %s. "+"ICT Market Structure (Order Blocks & Fair Value Gaps): %s. "+
       "As a professional self-correcting quant trader, analyze the macro trend, price history, candle patterns (like Hammer/Pin Bar wicks representing rejection at support/resistance floors), and GNN magnets. "+
-      "Instructions: 1. During strong trends (ADX > 25.0 and clear direction above/below EMA200/VWAP), you are highly encouraged to execute a LONG_TERM trade in the direction of the trend (e.g., using VOLUME_BREAKOUT or DONCHIAN_BREAKOUT) to capture a major multi-hour move (targeting 30-50+ points) with a wide Stop Loss. 2. If the price has deeply retraced to a macro GNN support floor (like Aqua lines) and you detect a bullish rejection (Hammers/long lower shadows), issue a LONG_TERM BUY swing trade targeting the Golden GNN resistance ceiling (50+ points above) with a wide Stop Loss below the support floor. 3. Conversely, if price has spiked to a Golden resistance ceiling and shows bearish rejection (Shooting Stars), issue a LONG_TERM SELL swing trade targeting the Aqua support floor. 4. LONG_TERM trades bypass all time decay exits and are intended to run for 4-5 hours to secure large trend gains, even with small lot sizes. 5. CRITICAL: Do NOT execute SELL trades when the price is close to (within 5 points of) an untested GNN Support floor (Aqua line), and do NOT execute BUY trades when the price is close to (within 5 points of) an untested GNN Resistance ceiling (Golden line). Selling the support floor or buying the resistance ceiling leads to instant losses on pullbacks. Wait for a breakout or trade the bounce. Identify wick rejections and adjust your decision or stop loss buffer to let wicks breathe. 6. Under ICT Concepts: You are highly encouraged to buy when the price retraces to a Bullish Order Block, or sell when it rises to a Bearish Order Block. If a breakout leaves an FVG, you can choose to enter a limit order in the FVG zone rather than buying the top or selling the bottom. "+
+      "Instructions: 1. During strong trends (ADX > 25.0 and clear direction above/below EMA200/VWAP), you are highly encouraged to execute a LONG_TERM trade in the direction of the trend (e.g., using VOLUME_BREAKOUT or DONCHIAN_BREAKOUT) to capture a major multi-hour move (targeting 30-50+ points) with a wide Stop Loss. 2. If the price has deeply retraced to a macro GNN support floor (like Aqua lines) and you detect a bullish rejection (Hammers/long lower shadows), issue a LONG_TERM BUY swing trade targeting the Golden GNN resistance ceiling (50+ points above) with a wide Stop Loss below the support floor. 3. Conversely, if price has spiked to a Golden resistance ceiling and shows bearish rejection (Shooting Stars), issue a LONG_TERM SELL swing trade targeting the Aqua support floor. 4. LONG_TERM trades bypass all time decay exits and are intended to run for 4-5 hours to secure large trend gains, even with small lot sizes. 5. CRITICAL: Do NOT execute SELL trades when the price is close to (within 5 points of) an untested GNN Support floor (Aqua line), and do NOT execute BUY trades when the price is close to (within 5 points of) an untested GNN Resistance ceiling (Golden line). Selling the support floor or buying the resistance ceiling leads to instant losses on pullbacks. Wait for a breakout or trade the bounce. Identify wick rejections and adjust your decision or stop loss buffer to let wicks breathe. 7. RANGE FLUX PATIENCE: When price is oscillating inside the GNN Golden/Aqua channel, be patient. Bounces are normal. The system automatically bypasses soft-stops inside the channel and will execute a break-even escape (+$0.20) on pullbacks rather than taking range losses. 6. Under ICT Concepts: You are highly encouraged to buy when the price retraces to a Bullish Order Block, or sell when it rises to a Bearish Order Block. If a breakout leaves an FVG, you can choose to enter a limit order in the FVG zone rather than buying the top or selling the bottom. "+
       "Respond strictly with a JSON object containing: "+
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
@@ -3231,6 +3232,61 @@ void GetNearestOrderBlocks(double &bullOB_Low, double &bullOB_High, double &bear
    }
 }
 
+
+//+------------------------------------------------------------------+
+//| Check if current price is trapped inside GNN golden/aqua channel |
+//+------------------------------------------------------------------+
+bool IsInsideGNNChannel()
+{
+   double nearestHighs[];
+   double nearestLows[];
+   string dummy = "";
+   GetUntestedMagnets(nearestHighs, nearestLows, dummy);
+   
+   if(ArraySize(nearestHighs) > 0 && ArraySize(nearestLows) > 0)
+   {
+      double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      if(currentPrice >= nearestLows[0] && currentPrice <= nearestHighs[0])
+      {
+         return true;
+      }
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Manage Sideways Escape (Exit at break-even in rangebound market) |
+//+------------------------------------------------------------------+
+void ManageSidewaysEscape(bool reversionModeActive)
+{
+   bool isSidewaysRegime = reversionModeActive || IsInsideGNNChannel();
+   if(!isSidewaysRegime) return;
+   
+   int totalPositions = PositionsTotal();
+   for(int i = totalPositions - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket <= 0) continue;
+      
+      if(PositionGetInteger(POSITION_MAGIC) == InpMagicNumber && PositionGetString(POSITION_SYMBOL) == _Symbol)
+      {
+         string comment = PositionGetString(POSITION_COMMENT);
+         if(comment == "HEDGE_FREEZE" || comment == "RECOVERY_ENTRY") continue;
+         
+         datetime posTime = (datetime)PositionGetInteger(POSITION_TIME);
+         if(TimeCurrent() - posTime >= PeriodSeconds(_Period))
+         {
+            double profit = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+            if(profit >= 0.20)
+            {
+               PrintFormat("[Sideways Escape] Position #%I64u has been open for > 1 bar. Profit: $%.2f. Closing at range center...", ticket, profit);
+               trade.PositionClose(ticket);
+            }
+         }
+      }
+   }
+}
+
 void OnTick()
 {
    UpdateSpreadBuffer();
@@ -3308,6 +3364,9 @@ void OnTick()
    
    // Keep dashboard drawn and updated on every tick
    DrawChartStatus(currentADX, currentATR, useReversionMode);
+   
+   // Process Sideways Escape
+   ManageSidewaysEscape(useReversionMode);
 
    // Check if EA is paused by the on-chart button
    if(!g_eaRunning)
