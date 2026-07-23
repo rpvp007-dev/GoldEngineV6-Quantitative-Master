@@ -265,6 +265,10 @@ double         g_priceOffset;
 double         g_stopLossDist;
 double         g_takeProfitDist;
 
+// Mid-Candle AI Call Cooldowns
+bool           g_midCandleQueried = false;
+datetime       g_lastAICallTime = 0;
+
 // Hedge Recovery State Tracking
 bool           g_hedgeActive = false;
 ulong          g_hedgeTicket = 0;
@@ -1996,7 +2000,7 @@ double GetStopLossDistance(string sym, double price, double atr)
 //+------------------------------------------------------------------+
 //| Execute new order placement (Once per candle or on recovery)     |
 //+------------------------------------------------------------------+
-bool ExecuteNewOrderPlacement(datetime currentBarTime)
+bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
 {
    if(g_hedgeActive) return false;
    double prevHigh = iHigh(_Symbol, _Period, 1);
@@ -2203,7 +2207,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    }
 
    // Lock queries for the current candle to exactly once
-   g_lastOrderPlacedBarTime = currentBarTime;
+   if(!isMidCandle) g_lastOrderPlacedBarTime = currentBarTime;
 
    bool useReversionMode = CalculateReversionMode(currentADX, isMomentumHour, isVolatilitySpike, aiActive, g_aiRegime);
 
@@ -3489,6 +3493,84 @@ void ManageSidewaysEscape(bool reversionModeActive)
    }
 }
 
+
+//+------------------------------------------------------------------+
+//| Check Mid-Candle Event Triggers for AI Queries                   |
+//+------------------------------------------------------------------+
+void CheckMidCandleTriggers(datetime currentBarTime)
+{
+   if(!InpUseAIEngines || !g_eaRunning) return;
+   if(CountActiveTrades() > 0) return;
+   
+   if(g_midCandleQueried || (TimeCurrent() - g_lastAICallTime < 30)) return;
+   
+   double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   
+   bool triggerAI = false;
+   string triggerReason = "";
+   
+   double nearestHighs[];
+   double nearestLows[];
+   string dummy = "";
+   GetUntestedMagnets(nearestHighs, nearestLows, dummy);
+   
+   if(ArraySize(nearestLows) > 0 && MathAbs(currentBid - nearestLows[0]) <= 0.20)
+   {
+      triggerAI = true;
+      triggerReason = StringFormat("GNN Aqua Support Floor Touch at %.2f", nearestLows[0]);
+   }
+   else if(ArraySize(nearestHighs) > 0 && MathAbs(currentAsk - nearestHighs[0]) <= 0.20)
+   {
+      triggerAI = true;
+      triggerReason = StringFormat("GNN Golden Resistance Ceiling Touch at %.2f", nearestHighs[0]);
+   }
+   
+   if(!triggerAI)
+   {
+      double bullOB_Low = 0.0, bullOB_High = 0.0;
+      double bearOB_Low = 0.0, bearOB_High = 0.0;
+      GetNearestOrderBlocks(bullOB_Low, bullOB_High, bearOB_Low, bearOB_High);
+      
+      if(bullOB_High > 0.0 && currentBid >= bullOB_Low && currentBid <= bullOB_High)
+      {
+         triggerAI = true;
+         triggerReason = StringFormat("Institutional Demand (Bullish OB) Entry at %.2f", currentBid);
+      }
+      else if(bearOB_Low > 0.0 && currentAsk >= bearOB_Low && currentAsk <= bearOB_High)
+      {
+         triggerAI = true;
+         triggerReason = StringFormat("Institutional Supply (Bearish OB) Entry at %.2f", currentAsk);
+      }
+   }
+   
+   if(!triggerAI)
+   {
+      double fvgLow = 0.0, fvgHigh = 0.0;
+      int fvgType = 0;
+      GetLatestUnmitigatedFVG(fvgLow, fvgHigh, fvgType);
+      
+      if(fvgType == 1 && currentBid >= fvgLow && currentBid <= fvgHigh)
+      {
+         triggerAI = true;
+         triggerReason = StringFormat("Bullish FVG Imbalance Entry at %.2f", currentBid);
+      }
+      else if(fvgType == -1 && currentAsk >= fvgLow && currentAsk <= fvgHigh)
+      {
+         triggerAI = true;
+         triggerReason = StringFormat("Bearish FVG Imbalance Entry at %.2f", currentAsk);
+      }
+   }
+   
+   if(triggerAI)
+   {
+      g_midCandleQueried = true;
+      g_lastAICallTime = TimeCurrent();
+      PrintFormat("[Mid-Candle Trigger] Event: %s. Querying AI Brain mid-candle...", triggerReason);
+      ExecuteNewOrderPlacement(currentBarTime, true);
+   }
+}
+
 void OnTick()
 {
    // Process AI Hedging Recovery
@@ -3598,6 +3680,7 @@ void OnTick()
       
       g_lastBarTime = currentBarTime;
       CancelPendingOrdersEx(!useReversionMode);
+      g_midCandleQueried = false; // Reset mid-candle status for the new bar!
    }
 
    if(g_eaRunning)
@@ -3632,5 +3715,8 @@ void OnTick()
          ExecuteNewOrderPlacement(currentBarTime);
       }
    }
+   
+   // Process Mid-Candle Event-Triggered Entries
+   CheckMidCandleTriggers(currentBarTime);
 }
 //+------------------------------------------------------------------+
