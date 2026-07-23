@@ -2095,7 +2095,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
           double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
           double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
           
-          double scalpingSL = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(currentBid - 0.60, _Digits);
+          double scalpingSL = (structuralSL > 0.0 && structuralSL < currentAsk) ? structuralSL : NormalizeDouble(currentBid - 0.60, _Digits);
           double scalpingTP = (structuralTP > 0.0) ? structuralTP : NormalizeDouble(currentBid + 0.80, _Digits);
           
           if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
@@ -2109,7 +2109,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
           }
           else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
           {
-             scalpingSL = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(currentAsk + 0.60, _Digits);
+             scalpingSL = (structuralSL > currentBid) ? structuralSL : NormalizeDouble(currentAsk + 0.60, _Digits);
              scalpingTP = (structuralTP > 0.0) ? structuralTP : NormalizeDouble(currentAsk - 0.80, _Digits);
              
              double maxRiskSL = NormalizeDouble(currentAsk + (2.0 * g_stopLossDist), _Digits);
@@ -2129,7 +2129,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
           if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
           {
              double limitPrice = NormalizeDouble(currentEMA, _Digits);
-             double pullbackSL = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(limitPrice - 0.80, _Digits);
+             double pullbackSL = (structuralSL > 0.0 && structuralSL < limitPrice) ? structuralSL : NormalizeDouble(limitPrice - 0.80, _Digits);
              double pullbackTP = (structuralTP > 0.0) ? structuralTP : NormalizeDouble(limitPrice + 2.00, _Digits);
              
              // Risk Cap
@@ -2156,7 +2156,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
           else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
           {
              double limitPrice = NormalizeDouble(currentEMA, _Digits);
-             double pullbackSL = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(limitPrice + 0.80, _Digits);
+             double pullbackSL = (structuralSL > limitPrice) ? structuralSL : NormalizeDouble(limitPrice + 0.80, _Digits);
              double pullbackTP = (structuralTP > 0.0) ? structuralTP : NormalizeDouble(limitPrice - 2.00, _Digits);
              
              // Risk Cap
@@ -2183,23 +2183,23 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
           return false;
        }
        
-       if(g_aiStrategy == "STRADDLE")
-       {
-          double buyStopPrice  = NormalizeDouble(prevHigh + g_priceOffset + spread, _Digits);
-          double buySL         = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(buyStopPrice - g_stopLossDist, _Digits);
-          double buyTP         = (structuralTP > 0.0) ? structuralTP : ((g_takeProfitDist > 0.0) ? NormalizeDouble(buyStopPrice + g_takeProfitDist, _Digits) : 0.0);
-          
-          // Risk Cap
-          double maxBuyRiskSL = NormalizeDouble(buyStopPrice - (2.0 * g_stopLossDist), _Digits);
-          if(buySL < maxBuyRiskSL) buySL = maxBuyRiskSL;
-          
-          double sellStopPrice = NormalizeDouble(prevLow - g_priceOffset, _Digits);
-          double sellSL        = (structuralSL > 0.0) ? structuralSL : NormalizeDouble(sellStopPrice + g_stopLossDist, _Digits);
-          double sellTP        = (structuralTP > 0.0) ? structuralTP : ((g_takeProfitDist > 0.0) ? NormalizeDouble(sellStopPrice - g_takeProfitDist, _Digits) : 0.0);
-          
-          // Risk Cap
-          double maxSellRiskSL = NormalizeDouble(sellStopPrice + (2.0 * g_stopLossDist), _Digits);
-          if(sellSL > maxSellRiskSL) sellSL = maxSellRiskSL;
+        if(g_aiStrategy == "STRADDLE")
+        {
+           double buyStopPrice  = NormalizeDouble(prevHigh + g_priceOffset + spread, _Digits);
+           double buySL         = (structuralSL > 0.0 && structuralSL < buyStopPrice) ? structuralSL : NormalizeDouble(buyStopPrice - g_stopLossDist, _Digits);
+           double buyTP         = (structuralTP > 0.0) ? structuralTP : ((g_takeProfitDist > 0.0) ? NormalizeDouble(buyStopPrice + g_takeProfitDist, _Digits) : 0.0);
+           
+           // Risk Cap
+           double maxBuyRiskSL = NormalizeDouble(buyStopPrice - (2.0 * g_stopLossDist), _Digits);
+           if(buySL < maxBuyRiskSL) buySL = maxBuyRiskSL;
+           
+           double sellStopPrice = NormalizeDouble(prevLow - g_priceOffset, _Digits);
+           double sellSL        = (structuralSL > sellStopPrice) ? structuralSL : NormalizeDouble(sellStopPrice + g_stopLossDist, _Digits);
+           double sellTP        = (structuralTP > 0.0) ? structuralTP : ((g_takeProfitDist > 0.0) ? NormalizeDouble(sellStopPrice - g_takeProfitDist, _Digits) : 0.0);
+           
+           // Risk Cap
+           double maxSellRiskSL = NormalizeDouble(sellStopPrice + (2.0 * g_stopLossDist), _Digits);
+           if(sellSL > maxSellRiskSL) sellSL = maxSellRiskSL;
           
           if(g_dailySentiment != "SELL_ONLY")
           {
