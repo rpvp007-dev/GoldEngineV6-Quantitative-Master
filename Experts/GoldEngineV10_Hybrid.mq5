@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, GoldEngine V10"
 #property link      "https://github.com/rpvp007-dev"
-#property version   "16.00"
+#property version   "16.10"
 
 #include <Trade\Trade.mqh>
 
@@ -967,7 +967,8 @@ bool QueryGeminiConvictionEngine(double adx, double atr, double rsi, double ema)
    
    if(res != 200)
    {
-      Print("[Conviction Engine Error] HTTP Response: ", res);
+      string errorResponse = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+      Print("[Conviction Engine Error] HTTP Response: ", res, ", Response: ", errorResponse);
       g_aiDecision = "API ERROR";
       g_aiConviction = 0;
       g_aiReason = "Gemini API connection failed.";
@@ -1232,6 +1233,55 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
 }
 
 //+------------------------------------------------------------------+
+//| Query Google Gemini API to test if key is valid on startup       |
+//+------------------------------------------------------------------+
+void TestGeminiAPI()
+{
+   if(InpGeminiAPIKey == "" || InpGeminiAPIKey == "PASTE_YOUR_API_KEY_HERE")
+   {
+      Print("[Gemini API Test] No API key configured.");
+      g_aiReason = "Awaiting API Key...";
+      return;
+   }
+   
+   string prompt = "Respond strictly with the single word: OK";
+   string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
+   string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + InpGeminiAPIKey;
+   string headers = "Content-Type: application/json\r\n";
+   
+   char post[];
+   char result[];
+   string responseHeaders = "";
+   StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+   
+   ResetLastError();
+   int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
+   
+   if(res == 200)
+   {
+      Print("[Gemini API Test] Connection successful! Your API key is valid.");
+      g_aiReason = "API Connection OK";
+      g_aiDecision = "WAITING";
+   }
+   else
+   {
+      string errText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+      Print("[Gemini API Test Failed] HTTP Status: ", res, ", Response: ", errText);
+      
+      string msg = ExtractJSONValue(errText, "message");
+      if(msg != "")
+      {
+         g_aiReason = "API Key Error: " + msg;
+      }
+      else
+      {
+         g_aiReason = StringFormat("API Error code %d", res);
+      }
+      g_aiDecision = "API ERROR";
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Expert initialization presets and indicators loading             |
 //+------------------------------------------------------------------+
 int OnInit()
@@ -1261,6 +1311,9 @@ int OnInit()
    
    // 3. Create UI elements
    CreateInterface();
+   
+   // 4. Test Gemini connection live on startup
+   TestGeminiAPI();
    
    return(INIT_SUCCEEDED);
 }
