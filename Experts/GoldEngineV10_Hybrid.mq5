@@ -180,6 +180,7 @@ string         g_aiDecision = "WAITING";
 int            g_aiConviction = 0;
 string         g_aiReason = "Awaiting setup...";
 string         g_aiStrategy = "NONE";
+string         g_tradeHorizon = "SHORT_TERM"; // SHORT_TERM or LONG_TERM holding time horizon
 
 //+------------------------------------------------------------------+
 //| Determine higher timeframe for trend alignment                  |
@@ -420,6 +421,10 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
    if(g_aiStrategy != "NONE" && g_aiStrategy != "")
    {
       modeStr += " (" + g_aiStrategy + ")";
+   }
+   if(InpUseAIEngines && g_tradeHorizon != "")
+   {
+      modeStr += " [" + g_tradeHorizon + "]";
    }
    
    ObjectSetString(0, "DbTimeframe", OBJPROP_TEXT, "Chart Timeframe : " + tfName);
@@ -1036,7 +1041,7 @@ void ManageActivePositions()
             double currentVolume = PositionGetDouble(POSITION_VOLUME);
             datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
             
-            if(g_enableTimeDecay)
+            if(g_enableTimeDecay && g_tradeHorizon != "LONG_TERM")
             {
                int durationSec = (int)(TimeCurrent() - openTime);
                if(durationSec >= g_maxHoldMinutes * 60)
@@ -1046,54 +1051,28 @@ void ManageActivePositions()
                }
             }
             
+            double mult = (g_tradeHorizon == "LONG_TERM") ? 2.0 : 1.0;
+            double actBETrigger     = g_beTrigger * mult;
+            double actBEOffset      = g_beOffset * mult;
+            double actStage1Trigger = g_stage1Trigger * mult;
+            double actStage1Dist    = g_stage1Distance * mult;
+            double actStage2Trigger = g_stage2Trigger * mult;
+            double actStage2Dist    = g_stage2Distance * mult;
+            
             if(type == POSITION_TYPE_BUY)
             {
                double currentProfit = currentBid - entryPrice;
                double targetSL = 0.0;
                
-               if(g_enableStage2 && currentProfit >= g_stage2Trigger)
+               if(g_enableStage2 && currentProfit >= actStage2Trigger)
                {
-                  targetSL = NormalizeDouble(currentBid - g_stage2Distance, _Digits);
+                  targetSL = NormalizeDouble(currentBid - actStage2Dist, _Digits);
                }
-               else if(g_enableStage1 && currentProfit >= g_stage1Trigger)
+               else if(g_enableStage1 && currentProfit >= actStage1Trigger)
                {
-                  targetSL = NormalizeDouble(currentBid - g_stage1Distance, _Digits);
+                  targetSL = NormalizeDouble(currentBid - actStage1Dist, _Digits);
                }
-               else if(g_enableBE && currentProfit >= g_beTrigger)
-               {
-                  if(InpEnablePartialClose && currentVolume >= g_lotSize)
-                  {
-                     double closeLots = NormalizeDouble(g_lotSize / 2.0, 2);
-                     if(closeLots > 0.0)
-                     {
-                        trade.PositionClosePartial(ticket, closeLots);
-                     }
-                  }
-                  targetSL = NormalizeDouble(entryPrice + g_beOffset, _Digits);
-               }
-               
-               if(targetSL > 0.0 && (targetSL > currentSL || currentSL == 0.0))
-               {
-                  if(currentBid - targetSL >= stopsLevel)
-                  {
-                     trade.PositionModify(ticket, targetSL, currentTP);
-                  }
-               }
-            }
-            else if(type == POSITION_TYPE_SELL)
-            {
-               double currentProfit = entryPrice - currentAsk;
-               double targetSL = 0.0;
-               
-               if(g_enableStage2 && currentProfit >= g_stage2Trigger)
-               {
-                  targetSL = NormalizeDouble(currentAsk + g_stage2Distance, _Digits);
-               }
-               else if(g_enableStage1 && currentProfit >= g_stage1Trigger)
-               {
-                  targetSL = NormalizeDouble(currentAsk + g_stage1Distance, _Digits);
-               }
-               else if(g_enableBE && currentProfit >= g_beTrigger)
+               else if(g_enableBE && currentProfit >= actBETrigger)
                {
                   if(InpEnablePartialClose && currentVolume >= g_lotSize)
                   {
@@ -1101,19 +1080,53 @@ void ManageActivePositions()
                      if(closeLots > 0.0)
                      {
                         trade.PositionClosePartial(ticket, closeLots);
-                     }
-                  }
-                  targetSL = NormalizeDouble(entryPrice - g_beOffset, _Digits);
-               }
-               
-               if(targetSL > 0.0 && (targetSL < currentSL || currentSL == 0.0))
-               {
-                  if(targetSL - currentAsk >= stopsLevel)
-                  {
-                     trade.PositionModify(ticket, targetSL, currentTP);
-                  }
-               }
-            }
+                      }
+                   }
+                   targetSL = NormalizeDouble(entryPrice + actBEOffset, _Digits);
+                }
+                
+                if(targetSL > 0.0 && (targetSL > currentSL || currentSL == 0.0))
+                {
+                   if(currentBid - targetSL >= stopsLevel)
+                   {
+                      trade.PositionModify(ticket, targetSL, currentTP);
+                   }
+                }
+             }
+             else if(type == POSITION_TYPE_SELL)
+             {
+                double currentProfit = entryPrice - currentAsk;
+                double targetSL = 0.0;
+                
+                if(g_enableStage2 && currentProfit >= actStage2Trigger)
+                {
+                   targetSL = NormalizeDouble(currentAsk + actStage2Dist, _Digits);
+                }
+                else if(g_enableStage1 && currentProfit >= actStage1Trigger)
+                {
+                   targetSL = NormalizeDouble(currentAsk + actStage1Dist, _Digits);
+                }
+                else if(g_enableBE && currentProfit >= actBETrigger)
+                {
+                   if(InpEnablePartialClose && currentVolume >= g_lotSize)
+                   {
+                      double closeLots = NormalizeDouble(g_lotSize / 2.0, 2);
+                      if(closeLots > 0.0)
+                      {
+                         trade.PositionClosePartial(ticket, closeLots);
+                      }
+                   }
+                   targetSL = NormalizeDouble(entryPrice - actBEOffset, _Digits);
+                }
+                
+                if(targetSL > 0.0 && (targetSL < currentSL || currentSL == 0.0))
+                {
+                   if(targetSL - currentAsk >= stopsLevel)
+                   {
+                      trade.PositionModify(ticket, targetSL, currentTP);
+                   }
+                }
+             }
          }
       }
    }
@@ -1464,16 +1477,17 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "Gold (XAUUSD) setup analysis. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
       "Price History: %s. "+
       "Recent closed trades history: %s. "+
-      "As a professional self-correcting quant trader, analyze the recent trade outcomes, evaluate current structure, and select the optimal strategy. "+
+      "As a professional self-correcting quant trader, analyze the recent trade outcomes, evaluate current structure, select the optimal strategy, and classify the hold time horizon (short quick trades vs long trend trades). "+
       "Respond strictly with a JSON object containing: "+
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
       "'regime' ('BREAKOUT' or 'REVERSION'), "+
       "'strategy' ('BREAKOUT', 'MEAN_REVERSION', 'PULLBACK', 'STRADDLE', 'SCALPING', 'DONCHIAN_BREAKOUT', 'VOLUME_BREAKOUT', or 'VWAP_PULLBACK'), "+
+      "'horizon' ('SHORT_TERM' or 'LONG_TERM'), "+
       "'stop_loss_price' (double target stop loss price level, or 0.0 to use default), "+
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words explaining decision and why you adjusted based on recent trades). "+
-      "Example output: { 'decision': 'BUY', 'conviction': 80, 'regime': 'BREAKOUT', 'strategy': 'VOLUME_BREAKOUT', 'stop_loss_price': 4102.50, 'take_profit_price': 4118.00, 'reason': 'Volume breakout above Donchian channel with volume surge' }.",
+      "Example output: { 'decision': 'BUY', 'conviction': 80, 'regime': 'BREAKOUT', 'strategy': 'VOLUME_BREAKOUT', 'horizon': 'LONG_TERM', 'stop_loss_price': 4102.50, 'take_profit_price': 4118.00, 'reason': 'Volume breakout above Donchian channel with volume surge' }.",
       prevClose, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, barsHistory, tradeHistory
    );
 
@@ -1503,6 +1517,9 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          if(g_aiConviction > 100) g_aiConviction = 100;
          
          g_aiStrategy = (rawStrategy != "") ? rawStrategy : "BREAKOUT";
+         string rawHorizon = ExtractJSONValue(responseText, "horizon");
+         if(StringFind(rawHorizon, "LONG_TERM") >= 0) g_tradeHorizon = "LONG_TERM";
+         else g_tradeHorizon = "SHORT_TERM";
          g_aiReason = (rawReason != "") ? rawReason : "AI analyzed successfully.";
       }
       else
