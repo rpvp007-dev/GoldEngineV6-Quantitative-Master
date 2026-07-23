@@ -407,9 +407,9 @@ void UpdateButtonState()
 //+------------------------------------------------------------------+
 void CreateInterface()
 {
-   // Redesigned: 550px wide, 330px high to fit Combined Master System
+   // Redesigned: 550px wide, 360px high to fit spaced-out dashboard rows
    int panelWidth  = 550;
-   int panelHeight = 330;
+   int panelHeight = 360;
    int margin      = 25;
    int textX       = 20 + margin;
    int fontSize    = 8; 
@@ -420,19 +420,19 @@ void CreateInterface()
    // 2. Create Header
    CreateLabel("DbTitle", textX, 75, "GOLD ENGINE V10 - HYBRID PRO", 10, C'255,179,0', "Segoe UI Semibold");
    
-   // 3. Create Rows (Clean 18px line height)
+   // 3. Create Rows (Clean spaced-out 22px line height)
    CreateLabel("DbTimeframe", textX, 100, "Chart Timeframe : ", fontSize, clrWhite);
-   CreateLabel("DbLotSize",   textX, 118, "Dynamic Lot Size: ", fontSize, clrWhite);
-   CreateLabel("DbADX",       textX, 136, "Current ADX     : ", fontSize, clrWhite);
-   CreateLabel("DbATR",       textX, 154, "Current ATR     : ", fontSize, clrWhite);
-   CreateLabel("DbMode",      textX, 172, "Active Mode     : ", fontSize, clrWhite);
-   CreateLabel("DbSL",        textX, 190, "Stop Loss (ATR) : ", fontSize, clrWhite);
+   CreateLabel("DbLotSize",   textX, 122, "Dynamic Lot Size: ", fontSize, clrWhite);
+   CreateLabel("DbADX",       textX, 144, "Current ADX     : ", fontSize, clrWhite);
+   CreateLabel("DbATR",       textX, 166, "Current ATR     : ", fontSize, clrWhite);
+   CreateLabel("DbMode",      textX, 188, "Active Mode     : ", fontSize, clrWhite);
+   CreateLabel("DbSL",        textX, 210, "Stop Loss (ATR) : ", fontSize, clrWhite);
    
    // AI Dashboard Rows
-   CreateLabel("DbBias",      textX, 208, "AI Daily Bias   : ", fontSize, clrWhite);
-   CreateLabel("DbDecision",  textX, 226, "AI Decision     : ", fontSize, clrWhite);
-   CreateLabel("DbConviction",textX, 244, "AI Conviction   : ", fontSize, clrWhite);
-   CreateLabel("DbReason",    textX, 262, "AI Reason       : ", fontSize, clrWhite);
+   CreateLabel("DbBias",      textX, 232, "AI Daily Bias   : ", fontSize, clrWhite);
+   CreateLabel("DbDecision",  textX, 254, "AI Decision     : ", fontSize, clrWhite);
+   CreateLabel("DbConviction",textX, 276, "AI Conviction   : ", fontSize, clrWhite);
+   CreateLabel("DbReason",    textX, 298, "AI Reason       : ", fontSize, clrWhite);
    
    // 4. Create Button (Nested at the bottom of the panel with margins aligned)
    string btnName = "BtnEAToggle";
@@ -441,7 +441,7 @@ void CreateInterface()
       ObjectCreate(0, btnName, OBJ_BUTTON, 0, 0, 0);
    }
    ObjectSetInteger(0, btnName, OBJPROP_XDISTANCE, textX);
-   ObjectSetInteger(0, btnName, OBJPROP_YDISTANCE, 340); // Moved down to fit rows
+   ObjectSetInteger(0, btnName, OBJPROP_YDISTANCE, 365); // Moved down to fit spaced-out rows
    ObjectSetInteger(0, btnName, OBJPROP_XSIZE, panelWidth - (margin * 2));
    ObjectSetInteger(0, btnName, OBJPROP_YSIZE, 32);
    ObjectSetInteger(0, btnName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -2864,7 +2864,9 @@ int OnInit()
    // 2. Load presets safely
    LoadTimeframePresets();
    
-   // 3. Create UI elements
+   // 3. Create UI elements (clean up old cached objects to force layout recalculations)
+   ObjectsDeleteAll(0, "Db");
+   ObjectDelete(0, "BtnEAToggle");
    CreateInterface();
    
    // 4. Test AI Engines connection live on startup
