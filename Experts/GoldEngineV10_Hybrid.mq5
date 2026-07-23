@@ -19,6 +19,12 @@ enum ENUM_TF_MODE {
    TF_CUSTOM    // Custom Settings (Use manual inputs below)
 };
 
+enum ENUM_AI_ENGINE {
+   AI_GROQ,            // Groq Llama-3.1 (Recommended: Fast & High Quotas)
+   AI_GEMINI,          // Gemini Flash
+   AI_BOTH_FAILOVER    // Gemini first, failover to Groq
+};
+
 //--- Input Parameters
 input group "--- Target Timeframe Selection ---"
 input ENUM_TF_MODE InpTimeframeMode = TF_AUTO;    // Target Chart Timeframe Mode
@@ -26,7 +32,8 @@ input ENUM_TF_MODE InpTimeframeMode = TF_AUTO;    // Target Chart Timeframe Mode
 input group "--- AI Engine Settings ---"
 input string   InpGeminiAPIKey       = "AIzaSyB6PZqz_ck3sGIsr2XmBTK6Qo02zpkSt60"; // Gemini API Key (aistudio.google.com)
 input string   InpGroqAPIKey         = "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"; // Groq API Key (console.groq.com)
-input bool     InpUseGeminiAI        = true;    // Use AI Engines for Trade Decisions
+input bool     InpUseAIEngines       = true;    // Enable AI Brain Integration
+input ENUM_AI_ENGINE InpAIEngineSelection = AI_GROQ; // AI Engine Selection
 input int      InpMinConviction      = 50;      // Minimum AI Conviction to trade (0-100)
 
 input group "--- Core Risk Settings ---"
@@ -856,70 +863,88 @@ string ExtractJSONValue(string json, string key)
 //+------------------------------------------------------------------+
 //| Central AI client caller with automatic failover (Gemini->Groq)   |
 //+------------------------------------------------------------------+
+bool QueryGeminiDirect(string prompt, string &responseText)
+{
+   if(InpGeminiAPIKey == "" || InpGeminiAPIKey == "PASTE_YOUR_API_KEY_HERE") return false;
+   
+   string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
+   string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + InpGeminiAPIKey;
+   string headers = "Content-Type: application/json\r\n";
+   
+   char post[];
+   char result[];
+   string responseHeaders = "";
+   int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+   if(bytes > 0 && post[bytes-1] == 0) ArrayResize(post, bytes - 1);
+   
+   ResetLastError();
+   int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
+   if(res == 200)
+   {
+      responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+      Print("[Gemini Success] Response: ", responseText);
+      return true;
+   }
+   else
+   {
+      string err = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+      Print("[Gemini Fail] HTTP Status: ", res, ", Error Response: ", err);
+   }
+   return false;
+}
+
+bool QueryGroqDirect(string prompt, string &responseText)
+{
+   if(InpGroqAPIKey == "" || InpGroqAPIKey == "PASTE_YOUR_API_KEY_HERE") return false;
+   
+   string cleanPrompt = prompt;
+   StringReplace(cleanPrompt, "\"", "\\\"");
+   string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + cleanPrompt + "\"}],\"temperature\":0.2,\"response_format\":{\"type\":\"json_object\"}}";
+   string url = "https://api.groq.com/openai/v1/chat/completions";
+   string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpGroqAPIKey + "\r\n";
+   
+   char post[];
+   char result[];
+   string responseHeaders = "";
+   int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+   if(bytes > 0 && post[bytes-1] == 0) ArrayResize(post, bytes - 1);
+   
+   ResetLastError();
+   int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
+   if(res == 200)
+   {
+      responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+      Print("[Groq Success] Response: ", responseText);
+      return true;
+   }
+   else
+   {
+      string err = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+      Print("[Groq Fail] HTTP Status: ", res, ", Error Response: ", err);
+   }
+   return false;
+}
+
 bool CallAI(string prompt, string &responseText)
 {
-   // 1. Try Gemini first
-   if(InpGeminiAPIKey != "" && InpGeminiAPIKey != "PASTE_YOUR_API_KEY_HERE")
+   // --- Option 1: Groq Only ---
+   if(InpAIEngineSelection == AI_GROQ)
    {
-      string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
-      string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + InpGeminiAPIKey;
-      string headers = "Content-Type: application/json\r\n";
-      
-      char post[];
-      char result[];
-      string responseHeaders = "";
-      int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
-      if(bytes > 0 && post[bytes-1] == 0)
-      {
-         ArrayResize(post, bytes - 1);
-      }
-      
-      ResetLastError();
-      int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
-      if(res == 200)
-      {
-         responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-         Print("[Gemini Success] Response: ", responseText);
-         return true;
-      }
-      else
-      {
-         string err = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-         Print("[Gemini Fail] HTTP Status: ", res, ", Error Response: ", err);
-      }
+      return QueryGroqDirect(prompt, responseText);
    }
    
-   // 2. Failover to Groq (Llama-3.1-8B-Instant)
-   if(InpGroqAPIKey != "" && InpGroqAPIKey != "PASTE_YOUR_API_KEY_HERE")
+   // --- Option 2: Gemini Only ---
+   if(InpAIEngineSelection == AI_GEMINI)
    {
-      string cleanPrompt = prompt;
-      StringReplace(cleanPrompt, "\"", "\\\"");
-      string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + cleanPrompt + "\"}],\"temperature\":0.2,\"response_format\":{\"type\":\"json_object\"}}";
-      string url = "https://api.groq.com/openai/v1/chat/completions";
-      string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpGroqAPIKey + "\r\n";
-      
-      char post[];
-      char result[];
-      string responseHeaders = "";
-      int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
-      if(bytes > 0 && post[bytes-1] == 0)
-      {
-         ArrayResize(post, bytes - 1);
-      }
-      
-      ResetLastError();
-      int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
-      if(res == 200)
-      {
-         responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-         Print("[Groq Success] Response: ", responseText);
-         return true;
-      }
-      else
-      {
-         string err = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-         Print("[Groq Fail] HTTP Status: ", res, ", Error Response: ", err);
-      }
+      return QueryGeminiDirect(prompt, responseText);
+   }
+   
+   // --- Option 3: Gemini first, failover to Groq ---
+   if(InpAIEngineSelection == AI_BOTH_FAILOVER)
+   {
+      if(QueryGeminiDirect(prompt, responseText)) return true;
+      Print("[AI Failover] Gemini API unavailable. Switching to Groq Llama-3.1...");
+      return QueryGroqDirect(prompt, responseText);
    }
    
    return false;
@@ -1245,7 +1270,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    string responseText = "";
    string rawRegime = "BREAKOUT"; // default
    
-   if(InpUseGeminiAI)
+   if(InpUseAIEngines)
    {
       aiActive = CallAI(prompt, responseText);
       if(aiActive)
@@ -1547,84 +1572,44 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
 //+------------------------------------------------------------------+
 void TestAIEngines()
 {
-   bool geminiSuccess = false;
-   bool groqSuccess = false;
+   bool success = false;
+   string name = "";
    
-   // 1. Test Gemini
-   if(InpGeminiAPIKey != "" && InpGeminiAPIKey != "PASTE_YOUR_API_KEY_HERE")
+   if(InpAIEngineSelection == AI_GROQ)
    {
-      string prompt = "Respond strictly with the single word: OK";
-      string responseText = "";
-      
-      string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
-      string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + InpGeminiAPIKey;
-      string headers = "Content-Type: application/json\r\n";
-      
-      char post[];
-      char result[];
-      string responseHeaders = "";
-      int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
-      if(bytes > 0 && post[bytes-1] == 0) ArrayResize(post, bytes - 1);
-      
-      ResetLastError();
-      int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
-      if(res == 200)
-      {
-         Print("[Gemini API Diagnostic] Connection successful!");
-         geminiSuccess = true;
-      }
-      else
-      {
-         string errText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-         Print("[Gemini API Diagnostic Failed] HTTP Status: ", res, ", Response: ", errText);
-      }
+      name = "Groq Llama-3.1";
+      string resp = "";
+      success = QueryGroqDirect("Respond strictly with: OK", resp);
+   }
+   else if(InpAIEngineSelection == AI_GEMINI)
+   {
+      name = "Gemini Flash";
+      string resp = "";
+      success = QueryGeminiDirect("Respond strictly with: OK", resp);
+   }
+   else if(InpAIEngineSelection == AI_BOTH_FAILOVER)
+   {
+      name = "Gemini & Groq (Failover)";
+      string resp = "";
+      bool gemSuccess = QueryGeminiDirect("Respond strictly with: OK", resp);
+      bool groqSuccess = QueryGroqDirect("Respond strictly with: OK", resp);
+      success = gemSuccess || groqSuccess;
+      if(gemSuccess) g_aiReason = "Gemini API OK";
+      else if(groqSuccess) g_aiReason = "Groq API OK (Gemini Offline)";
    }
    
-   // 2. Test Groq
-   if(InpGroqAPIKey != "" && InpGroqAPIKey != "PASTE_YOUR_API_KEY_HERE")
-   {
-      string prompt = "Respond strictly with the word OK";
-      string responseText = "";
-      
-      string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + prompt + "\"}],\"temperature\":0.2,\"response_format\":{\"type\":\"json_object\"}}";
-      string url = "https://api.groq.com/openai/v1/chat/completions";
-      string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpGroqAPIKey + "\r\n";
-      
-      char post[];
-      char result[];
-      string responseHeaders = "";
-      int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
-      if(bytes > 0 && post[bytes-1] == 0) ArrayResize(post, bytes - 1);
-      
-      ResetLastError();
-      int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
-      if(res == 200)
-      {
-         Print("[Groq API Diagnostic] Connection successful!");
-         groqSuccess = true;
-      }
-      else
-      {
-         string errText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-         Print("[Groq API Diagnostic Failed] HTTP Status: ", res, ", Response: ", errText);
-      }
-   }
-   
-   // 3. Update Dashboard Status
-   if(geminiSuccess)
+   if(success)
    {
       g_aiDecision = "WAITING";
-      g_aiReason = "Gemini API OK";
-   }
-   else if(groqSuccess)
-   {
-      g_aiDecision = "WAITING";
-      g_aiReason = "Groq API OK (Gemini Offline)";
+      if(InpAIEngineSelection != AI_BOTH_FAILOVER)
+      {
+         g_aiReason = name + " OK";
+      }
    }
    else
    {
       g_aiDecision = "API ERROR";
-      g_aiReason = "Both AI services offline";
+      g_aiReason = name + " Offline";
    }
 }
 
