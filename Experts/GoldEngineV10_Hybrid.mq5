@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, GoldEngine V10"
 #property link      "https://github.com/rpvp007-dev"
-#property version   "14.00"
+#property version   "15.00"
 
 #include <Trade\Trade.mqh>
 
@@ -22,6 +22,10 @@ enum ENUM_TF_MODE {
 //--- Input Parameters
 input group "--- Target Timeframe Selection ---"
 input ENUM_TF_MODE InpTimeframeMode = TF_AUTO;    // Target Chart Timeframe Mode
+
+input group "--- Gemini AI Engine Settings ---"
+input string   InpGeminiAPIKey       = "";      // Gemini API Key (Get from aistudio.google.com)
+input bool     InpUseGeminiAI        = true;    // Use Gemini AI for Trade Decisions
 
 input group "--- Core Risk Settings ---"
 input double   InpLotSize          = 0.10;     // Fixed Lot Size (If Compounding is disabled)
@@ -135,6 +139,7 @@ double         g_candleTrailBuffer;
 
 // UI controls
 bool           g_eaRunning = true;  // Button state toggle
+string         g_aiDecision = "WAITING"; // Current AI decision state
 
 //+------------------------------------------------------------------+
 //| Determine higher timeframe for trend alignment                  |
@@ -308,7 +313,7 @@ void CreateInterface()
    CreateLabel("DbATR",       textX, 154, "Current ATR     : ", fontSize, clrWhite);
    CreateLabel("DbMode",      textX, 172, "Active Mode     : ", fontSize, clrWhite);
    CreateLabel("DbSL",        textX, 190, "Stop Loss (ATR) : ", fontSize, clrWhite);
-   CreateLabel("DbOffset",    textX, 208, "Entry Offset    : ", fontSize, clrWhite);
+   CreateLabel("DbOffset",    textX, 208, "Gemini Decision : ", fontSize, clrWhite);
    
    // 4. Create Button (Nested at the bottom of the panel with margins aligned)
    string btnName = "BtnEAToggle";
@@ -375,7 +380,18 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
    ObjectSetString(0, "DbATR",       OBJPROP_TEXT, StringFormat("Current ATR     : %.2f (Min: %.2f)", currentATR, g_minATR));
    ObjectSetString(0, "DbMode",      OBJPROP_TEXT, "Active Mode     : " + modeStr);
    ObjectSetString(0, "DbSL",        OBJPROP_TEXT, StringFormat("Stop Loss (ATR) : %.2f $", g_stopLossDist));
-   ObjectSetString(0, "DbOffset",    OBJPROP_TEXT, StringFormat("Entry Offset    : %.2f $", g_priceOffset));
+   
+   // Display Gemini Decision / Status
+   string geminiStatus = "Gemini Decision : " + g_aiDecision;
+   ObjectSetString(0, "DbOffset",    OBJPROP_TEXT, geminiStatus);
+   
+   // Highlight Gemini Status Color
+   if(g_aiDecision == "BUY")
+      ObjectSetInteger(0, "DbOffset", OBJPROP_COLOR, C'76,175,80');  // green
+   else if(g_aiDecision == "SELL")
+      ObjectSetInteger(0, "DbOffset", OBJPROP_COLOR, C'239,83,80'); // red
+   else
+      ObjectSetInteger(0, "DbOffset", OBJPROP_COLOR, C'255,179,0'); // amber
    
    // Highlight Active Mode Color
    if(reversionModeActive)
@@ -402,16 +418,16 @@ int CountActiveTrades()
    }
    // 2. Count pending orders
    for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = OrderGetTicket(i);
+      if(ticket > 0)
       {
-         ulong ticket = OrderGetTicket(i);
-         if(ticket > 0)
+         if(OrderGetString(ORDER_SYMBOL) == _Symbol && OrderGetInteger(ORDER_MAGIC) == InpMagicNumber)
          {
-            if(OrderGetString(ORDER_SYMBOL) == _Symbol && OrderGetInteger(ORDER_MAGIC) == InpMagicNumber)
-            {
-               count++;
-            }
+            count++;
          }
       }
+   }
    return count;
 }
 
@@ -874,6 +890,80 @@ void ManageActivePositions()
 }
 
 //+------------------------------------------------------------------+
+//| Simple string parsing helper to extract decision from JSON       |
+//+------------------------------------------------------------------+
+string ParseGeminiResponse(string json)
+{
+   int buyIdx = StringFind(json, "BUY");
+   int sellIdx = StringFind(json, "SELL");
+   int holdIdx = StringFind(json, "HOLD");
+   
+   if(buyIdx >= 0 && (sellIdx < 0 || buyIdx < sellIdx) && (holdIdx < 0 || buyIdx < holdIdx))
+      return "BUY";
+   if(sellIdx >= 0 && (buyIdx < 0 || sellIdx < buyIdx) && (holdIdx < 0 || sellIdx < holdIdx))
+      return "SELL";
+   if(holdIdx >= 0)
+      return "HOLD";
+      
+   return "HOLD"; // default fallback
+}
+
+//+------------------------------------------------------------------+
+//| Query Google Gemini 1.5 Flash API for market direction decision  |
+//+------------------------------------------------------------------+
+string GetGeminiDecision(double adx, double atr, double rsi, double ema)
+{
+   if(InpGeminiAPIKey == "" || InpGeminiAPIKey == "PASTE_YOUR_API_KEY_HERE")
+   {
+      return "NO_API_KEY";
+   }
+   
+   double prevClose = iClose(_Symbol, _Period, 1);
+   double prevOpen  = iOpen(_Symbol, _Period, 1);
+   double prevHigh  = iHigh(_Symbol, _Period, 1);
+   double prevLow   = iLow(_Symbol, _Period, 1);
+   
+   // Formulate detailed, concise analytical prompt
+   string prompt = StringFormat(
+      "Gold (XAUUSD) M1 candle closed. Metrics: Open=%.2f, Close=%.2f, High=%.2f, Low=%.2f. "+
+      "Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA(50)=%.2f. "+
+      "As a quant, evaluate if this price action is a breakout or reversion. "+
+      "Respond strictly with a JSON object format: {\\\"decision\\\": \\\"BUY\\\"} or {\\\"decision\\\": \\\"SELL\\\"} or {\\\"decision\\\": \\\"HOLD\\\"}. Do not write any other text.",
+      prevOpen, prevClose, prevHigh, prevLow, adx, atr, rsi, ema
+   );
+   
+   string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
+   string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + InpGeminiAPIKey;
+   string headers = "Content-Type: application/json\r\n";
+   
+   char post[];
+   char result[];
+   string responseHeaders = "";
+   StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+   
+   ResetLastError();
+   int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
+   
+   if(res == -1)
+   {
+      Print("[Gemini WebRequest Failed] Error code: ", GetLastError());
+      return "ERROR";
+   }
+   
+   if(res != 200)
+   {
+      string errorResponse = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+      Print("[Gemini HTTP Error] Status: ", res, ", Content: ", errorResponse);
+      return "ERROR";
+   }
+   
+   string responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+   string decision = ParseGeminiResponse(responseText);
+   
+   return decision;
+}
+
+//+------------------------------------------------------------------+
 //| Execute new order placement (Once per candle or on recovery)     |
 //+------------------------------------------------------------------+
 bool ExecuteNewOrderPlacement(datetime currentBarTime)
@@ -894,7 +984,6 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    ArraySetAsSeries(rsiVal, true);
    ArraySetAsSeries(adxVal, true);
    
-   // If indicators are not ready, return false to retry on next tick
    if(CopyBuffer(g_emaHandle, 0, 1, 1, emaVal) <= 0 || 
       CopyBuffer(g_atrHandle, 0, 1, 1, atrVal) <= 0 ||
       CopyBuffer(g_rsiHandle, 0, 1, 1, rsiVal) <= 0 ||
@@ -940,7 +1029,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       isMomentumHour = true;
    }
 
-   // Switch Mode
+   // Determine if we should trade reversion or breakout
    bool useReversionMode = false;
    if(InpEnableHybridMode)
    {
@@ -958,25 +1047,44 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       }
    }
 
+   // --- Gemini AI Decision Logic (If Enabled & Key is Pasted) ---
+   bool aiActive = false;
+   if(InpUseGeminiAI && InpGeminiAPIKey != "" && InpGeminiAPIKey != "PASTE_YOUR_API_KEY_HERE")
+   {
+      g_aiDecision = GetGeminiDecision(currentADX, currentATR, currentRSI, currentEMA);
+      aiActive = (g_aiDecision == "BUY" || g_aiDecision == "SELL" || g_aiDecision == "HOLD");
+   }
+   else
+   {
+      g_aiDecision = "LOCAL RULES";
+   }
+
    // Place Orders
    if(useReversionMode)
    {
       // --- SIDEWAYS RANGE MODE (Limit Orders) ---
-      // Dynamically place limit orders close to previous high/low (8 pips on M1, 15 pips on M5)
-      // to capture choppy movements immediately when price bounces.
+      // If AI is active, place orders ONLY in the direction recommended by Gemini!
+      // Gemini Buy -> places Buy Limit at support. Gemini Sell -> places Sell Limit at resistance.
       double reversionOffset = (InpTimeframeMode == TF_M1 || (InpTimeframeMode == TF_AUTO && _Period == PERIOD_M1)) ? 0.08 : 0.15;
       
-      double buyLimitPrice  = NormalizeDouble(prevLow - reversionOffset, _Digits);
-      double buySL          = NormalizeDouble(buyLimitPrice - g_stopLossDist, _Digits);
-      double buyTP          = (g_takeProfitDist > 0.0) ? NormalizeDouble(buyLimitPrice + g_takeProfitDist, _Digits) : 0.0;
+      bool placeBuy = (!aiActive || g_aiDecision == "BUY");
+      bool placeSell = (!aiActive || g_aiDecision == "SELL");
       
-      trade.BuyLimit(g_lotSize, buyLimitPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "Buy Limit Reversion");
+      if(placeBuy)
+      {
+         double buyLimitPrice  = NormalizeDouble(prevLow - reversionOffset, _Digits);
+         double buySL          = NormalizeDouble(buyLimitPrice - g_stopLossDist, _Digits);
+         double buyTP          = (g_takeProfitDist > 0.0) ? NormalizeDouble(buyLimitPrice + g_takeProfitDist, _Digits) : 0.0;
+         trade.BuyLimit(g_lotSize, buyLimitPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "Buy Limit Reversion");
+      }
       
-      double sellLimitPrice = NormalizeDouble(prevHigh + reversionOffset, _Digits);
-      double sellSL         = NormalizeDouble(sellLimitPrice + g_stopLossDist, _Digits);
-      double sellTP         = (g_takeProfitDist > 0.0) ? NormalizeDouble(sellLimitPrice - g_takeProfitDist, _Digits) : 0.0;
-      
-      trade.SellLimit(g_lotSize, sellLimitPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "Sell Limit Reversion");
+      if(placeSell)
+      {
+         double sellLimitPrice = NormalizeDouble(prevHigh + reversionOffset, _Digits);
+         double sellSL         = NormalizeDouble(sellLimitPrice + g_stopLossDist, _Digits);
+         double sellTP         = (g_takeProfitDist > 0.0) ? NormalizeDouble(sellLimitPrice - g_takeProfitDist, _Digits) : 0.0;
+         trade.SellLimit(g_lotSize, sellLimitPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "Sell Limit Reversion");
+      }
       
       g_lastOrderPlacedBarTime = currentBarTime;
       return true;
@@ -1001,29 +1109,39 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       bool allowBuy = true;
       bool allowSell = true;
       
-      if(InpUseEMAFilter)
+      // If AI is active, override local indicators and use Gemini's directional analysis
+      if(aiActive)
       {
-         allowBuy = (prevClose > currentEMA);
-         allowSell = (prevClose < currentEMA);
+         allowBuy  = (g_aiDecision == "BUY");
+         allowSell = (g_aiDecision == "SELL");
       }
-      
-      if(InpUseMTFTrendFilter)
+      else
       {
-         double emaHighVal[];
-         ArraySetAsSeries(emaHighVal, true);
-         if(CopyBuffer(g_emaHigherHandle, 0, 1, 1, emaHighVal) > 0)
+         // Fallback to local indicators
+         if(InpUseEMAFilter)
          {
-            double higherEMA = emaHighVal[0];
-            double higherClose = iClose(_Symbol, GetHigherTimeframe(), 1);
-            allowBuy  = allowBuy && (higherClose > higherEMA);
-            allowSell = allowSell && (higherClose < higherEMA);
+            allowBuy = (prevClose > currentEMA);
+            allowSell = (prevClose < currentEMA);
          }
-      }
+         
+         if(InpUseMTFTrendFilter)
+         {
+            double emaHighVal[];
+            ArraySetAsSeries(emaHighVal, true);
+            if(CopyBuffer(g_emaHigherHandle, 0, 1, 1, emaHighVal) > 0)
+            {
+               double higherEMA = emaHighVal[0];
+               double higherClose = iClose(_Symbol, GetHigherTimeframe(), 1);
+               allowBuy  = allowBuy && (higherClose > higherEMA);
+               allowSell = allowSell && (higherClose < higherEMA);
+            }
+         }
 
-      if(InpUseRSIFilter)
-      {
-         allowBuy  = allowBuy && (currentRSI < 70.0);
-         allowSell = allowSell && (currentRSI > 30.0);
+         if(InpUseRSIFilter)
+         {
+            allowBuy  = allowBuy && (currentRSI < 70.0);
+            allowSell = allowSell && (currentRSI > 30.0);
+         }
       }
 
       bool orderPlaced = false;
@@ -1242,7 +1360,6 @@ void OnTick()
    {
       if(CountActiveTrades() == 0)
       {
-         // Execute placement. If indicators are ready and placement succeeds, it updates g_lastOrderPlacedBarTime
          ExecuteNewOrderPlacement(currentBarTime);
       }
    }
