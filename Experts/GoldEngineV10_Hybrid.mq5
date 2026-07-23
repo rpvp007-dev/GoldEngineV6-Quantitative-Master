@@ -3487,6 +3487,18 @@ void CleanUpVisualBoxes()
 {
    ObjectsDeleteAll(0, "GE_OB_");
    ObjectsDeleteAll(0, "GE_FVG_");
+   ObjectsDeleteAll(0, "GE_OB");
+   ObjectsDeleteAll(0, "GE_FVG");
+   
+   int total = ObjectsTotal(0, 0, -1);
+   for(int i = total - 1; i >= 0; i--)
+   {
+      string name = ObjectName(0, i, 0, -1);
+      if(StringFind(name, "GE_") >= 0 || StringFind(name, "OB") >= 0 || StringFind(name, "FVG") >= 0)
+      {
+         ObjectDelete(0, name);
+      }
+   }
 }
 
 void OnTick()
