@@ -83,6 +83,18 @@ input double   InpTargetMult      = 1.5;      // Take Profit Multiplier (1.5x SL
 input double   InpMinSLPct        = 1.0;      // Default Min SL as % of price
 input double   InpMaxSLPct        = 3.0;      // Default Max SL as % of price
 
+input group "--- Strategy 2: Crypto Volume Breakout Settings ---"
+input double   InpVolumeMult1     = 1.8;      // Vol Breakout Multiplier
+input double   InpVolumeBreakTPMult = 2.0;    // Vol Breakout TP Multiplier (2.0x SL)
+input bool     InpUseLocalVolBreakout = true;  // Use Volume Breakout for local breakouts
+
+input group "--- Strategy 3: Crypto Scalp Momentum Settings ---"
+input double   InpVolumeMult2     = 1.2;      // Scalp Momentum Multiplier
+input int      InpEMA9Length      = 9;        // Pullback EMA Length
+input double   InpScalpTPMult     = 1.5;      // Scalp TP Multiplier (1.5x SL)
+input bool     InpUseLocalVWAPPullback = true; // Use VWAP Pullback for local setups
+
+
 input group "--- Profit Management Settings ---"
 input bool     InpEnablePartialClose = true;   // Close 50% lot at Break-Even Stage
 
@@ -128,6 +140,7 @@ int            g_atrHandle;         // ATR handle
 int            g_rsiHandle;         // RSI handle
 int            g_adxHandle;         // ADX handle
 int            g_ema200Handle;      // EMA 200 Trend Filter handle
+int            g_ema9Handle;        // EMA 9 handle
 
 // Spread smoothing buffers
 double         g_spreadBuffer[10];
@@ -1254,6 +1267,54 @@ void GetRecentTradesHistory(string &historyStr)
 }
 
 //+------------------------------------------------------------------+
+//| Get Volume SMA and anchor-free Daily VWAP calculation           |
+//+------------------------------------------------------------------+
+double GetVolumeSMA(int period)
+{
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+   if(CopyRates(_Symbol, _Period, 1, period, rates) > 0)
+   {
+      double sum = 0.0;
+      for(int i = 0; i < period; i++)
+      {
+         double vol = (double)rates[i].tick_volume;
+         if(rates[i].real_volume > 0) vol = (double)rates[i].real_volume;
+         sum += vol;
+      }
+      return sum / period;
+   }
+   return 0.0;
+}
+
+double GetDailyVWAP()
+{
+   MqlDateTime dt;
+   TimeCurrent(dt);
+   datetime todayStart = TimeCurrent() - (dt.hour * 3600 + dt.min * 60 + dt.sec);
+   
+   MqlRates rates[];
+   ArraySetAsSeries(rates, false);
+   int copied = CopyRates(_Symbol, _Period, todayStart, TimeCurrent(), rates);
+   if(copied <= 0) return 0.0;
+   
+   double sumPV = 0.0;
+   double sumV = 0.0;
+   for(int i = 0; i < copied; i++)
+   {
+      double typicalPrice = (rates[i].high + rates[i].low + rates[i].close) / 3.0;
+      double vol = (double)rates[i].tick_volume;
+      if(rates[i].real_volume > 0) vol = (double)rates[i].real_volume;
+      
+      sumPV += typicalPrice * vol;
+      sumV += vol;
+   }
+   
+   if(sumV > 0.0) return sumPV / sumV;
+   return 0.0;
+}
+
+//+------------------------------------------------------------------+
 //| Donchian Channel High/Low and dynamic Stop Loss calculation     |
 //+------------------------------------------------------------------+
 double GetChannelHigh(int length)
@@ -1373,6 +1434,18 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    {
       currentEMA200 = ema200Val[0];
    }
+   
+   double ema9Val[];
+   ArraySetAsSeries(ema9Val, true);
+   double currentEMA9 = 0.0;
+   if(CopyBuffer(g_ema9Handle, 0, 1, 1, ema9Val) > 0)
+   {
+      currentEMA9 = ema9Val[0];
+   }
+   
+   double currentVWAP = GetDailyVWAP();
+   double volSMA10    = GetVolumeSMA(10);
+   double volSMA20    = GetVolumeSMA(20);
 
    // --- Query the AI Conviction Engine ---
    string barsHistory = "";
@@ -1388,7 +1461,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    g_aiStrategy = "NONE";
 
    string prompt = StringFormat(
-      "Gold (XAUUSD) setup analysis. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, Spread=%.2f. "+
+      "Gold (XAUUSD) setup analysis. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
       "Price History: %s. "+
       "Recent closed trades history: %s. "+
       "As a professional self-correcting quant trader, analyze the recent trade outcomes, evaluate current structure, and select the optimal strategy. "+
@@ -1396,12 +1469,12 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
       "'regime' ('BREAKOUT' or 'REVERSION'), "+
-      "'strategy' ('BREAKOUT', 'MEAN_REVERSION', 'PULLBACK', 'STRADDLE', 'SCALPING', or 'DONCHIAN_BREAKOUT'), "+
+      "'strategy' ('BREAKOUT', 'MEAN_REVERSION', 'PULLBACK', 'STRADDLE', 'SCALPING', 'DONCHIAN_BREAKOUT', 'VOLUME_BREAKOUT', or 'VWAP_PULLBACK'), "+
       "'stop_loss_price' (double target stop loss price level, or 0.0 to use default), "+
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words explaining decision and why you adjusted based on recent trades). "+
-      "Example output: { 'decision': 'BUY', 'conviction': 80, 'regime': 'BREAKOUT', 'strategy': 'DONCHIAN_BREAKOUT', 'stop_loss_price': 4102.50, 'take_profit_price': 4118.00, 'reason': 'Donchian breakout with EMA200 filter confirmation' }.",
-      prevClose, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, spread, barsHistory, tradeHistory
+      "Example output: { 'decision': 'BUY', 'conviction': 80, 'regime': 'BREAKOUT', 'strategy': 'VOLUME_BREAKOUT', 'stop_loss_price': 4102.50, 'take_profit_price': 4118.00, 'reason': 'Volume breakout above Donchian channel with volume surge' }.",
+      prevClose, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, barsHistory, tradeHistory
    );
 
    bool aiActive = false;
@@ -1653,6 +1726,89 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
            }
            return false;
         }
+
+        if(g_aiStrategy == "VOLUME_BREAKOUT")
+        {
+           double ema200Val[];
+           ArraySetAsSeries(ema200Val, true);
+           if(CopyBuffer(g_ema200Handle, 0, 1, 1, ema200Val) > 0)
+           {
+              double curr_ema200 = ema200Val[0];
+              double ch_high = GetChannelHigh(InpChannelLength);
+              double ch_low = GetChannelLow(InpChannelLength);
+              
+              double donchianSL = (structuralSL > 0.0) ? (MathAbs(prevClose - structuralSL)) : GetStopLossDistance(_Symbol, prevClose, currentATR);
+              double donchianTP = (structuralTP > 0.0) ? (MathAbs(prevClose - structuralTP)) : (donchianSL * InpVolumeBreakTPMult);
+              
+              double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+              double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+              
+              if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+              {
+                 double buySL = currentAsk - donchianSL;
+                 double buyTP = currentAsk + donchianTP;
+                 
+                 double maxRiskSL = NormalizeDouble(currentAsk - (2.0 * g_stopLossDist), _Digits);
+                 if(buySL < maxRiskSL) buySL = maxRiskSL;
+                 
+                 trade.Buy(finalLotSize, _Symbol, currentAsk, buySL, buyTP, "AI Vol Breakout BUY");
+                 return true;
+              }
+              else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+              {
+                 double sellSL = currentBid + donchianSL;
+                 double sellTP = currentBid - donchianTP;
+                 
+                 double maxRiskSL = NormalizeDouble(currentBid + (2.0 * g_stopLossDist), _Digits);
+                 if(sellSL > maxRiskSL) sellSL = maxRiskSL;
+                 
+                 trade.Sell(finalLotSize, _Symbol, currentBid, sellSL, sellTP, "AI Vol Breakout SELL");
+                 return true;
+              }
+           }
+           return false;
+        }
+        
+        if(g_aiStrategy == "VWAP_PULLBACK")
+        {
+           double ema200Val[];
+           ArraySetAsSeries(ema200Val, true);
+           if(CopyBuffer(g_ema200Handle, 0, 1, 1, ema200Val) > 0)
+           {
+              double curr_ema200 = ema200Val[0];
+              double currentVWAP = GetDailyVWAP();
+              
+              double pullbackSL = (structuralSL > 0.0) ? (MathAbs(prevClose - structuralSL)) : GetStopLossDistance(_Symbol, prevClose, currentATR);
+              double pullbackTP = (structuralTP > 0.0) ? (MathAbs(prevClose - structuralTP)) : (pullbackSL * InpScalpTPMult);
+              
+              double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+              double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+              
+              if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+              {
+                 double buySL = currentAsk - pullbackSL;
+                 double buyTP = currentAsk + pullbackTP;
+                 
+                 double maxRiskSL = NormalizeDouble(currentAsk - (2.0 * g_stopLossDist), _Digits);
+                 if(buySL < maxRiskSL) buySL = maxRiskSL;
+                 
+                 trade.Buy(finalLotSize, _Symbol, currentAsk, buySL, buyTP, "AI VWAP Pullback BUY");
+                 return true;
+              }
+              else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+              {
+                 double sellSL = currentBid + pullbackSL;
+                 double sellTP = currentBid - pullbackTP;
+                 
+                 double maxRiskSL = NormalizeDouble(currentBid + (2.0 * g_stopLossDist), _Digits);
+                 if(sellSL > maxRiskSL) sellSL = maxRiskSL;
+                 
+                 trade.Sell(finalLotSize, _Symbol, currentBid, sellSL, sellTP, "AI VWAP Pullback SELL");
+                 return true;
+              }
+           }
+           return false;
+        }
      }
 
     // --- Determine Entry Mode (Fallback / Standard AI regime switch) ---
@@ -1684,6 +1840,78 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
     // Place Orders in accordance with Daily Sentiment Anchor
     if(useReversionMode)
     {
+       if(!aiActive && InpUseLocalVWAPPullback)
+       {
+          double ema200Val[];
+          ArraySetAsSeries(ema200Val, true);
+          if(CopyBuffer(g_ema200Handle, 0, 1, 1, ema200Val) > 0)
+          {
+             double curr_ema200 = ema200Val[0];
+             double currentVWAP = GetDailyVWAP();
+             
+             double ema9Val[];
+             ArraySetAsSeries(ema9Val, true);
+             if(CopyBuffer(g_ema9Handle, 0, 1, 3, ema9Val) > 0)
+             {
+                double close1 = iClose(_Symbol, _Period, 1);
+                double close2 = iClose(_Symbol, _Period, 2);
+                
+                double low1 = iLow(_Symbol, _Period, 1);
+                double low2 = iLow(_Symbol, _Period, 2);
+                double low3 = iLow(_Symbol, _Period, 3);
+                
+                double high1 = iHigh(_Symbol, _Period, 1);
+                double high2 = iHigh(_Symbol, _Period, 2);
+                double high3 = iHigh(_Symbol, _Period, 3);
+                
+                double currRSI = currentRSI;
+                double currVol = (double)iVolume(_Symbol, _Period, 1);
+                double volSMA20 = GetVolumeSMA(20);
+                
+                bool volOk = (currVol >= InpVolumeMult2 * volSMA20);
+                
+                bool pullbackBuy = (low1 <= ema9Val[0] || low2 <= ema9Val[1] || low3 <= ema9Val[2]);
+                bool triggerBuy = (close1 > ema9Val[0] && close2 <= ema9Val[1]);
+                bool rsiBuyOk = (currRSI >= 45.0 && currRSI <= 65.0);
+                bool trendBuyOk = (close1 > curr_ema200 && close1 > currentVWAP);
+                
+                bool pullbackSell = (high1 >= ema9Val[0] || high2 >= ema9Val[1] || high3 >= ema9Val[2]);
+                bool triggerSell = (close1 < ema9Val[0] && close2 >= ema9Val[1]);
+                bool rsiSellOk = (currRSI >= 35.0 && currRSI <= 55.0);
+                bool trendSellOk = (close1 < curr_ema200 && close1 < currentVWAP);
+                
+                if(trendBuyOk && pullbackBuy && triggerBuy && volOk && rsiBuyOk && (g_dailySentiment != "SELL_ONLY"))
+                {
+                   double pullbackSL = GetStopLossDistance(_Symbol, prevClose, currentATR);
+                   double pullbackTP = pullbackSL * InpScalpTPMult;
+                   double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+                   double buySL = currentAsk - pullbackSL;
+                   double buyTP = currentAsk + pullbackTP;
+                   
+                   double maxRiskSL = NormalizeDouble(currentAsk - (2.0 * g_stopLossDist), _Digits);
+                   if(buySL < maxRiskSL) buySL = maxRiskSL;
+                   
+                   trade.Buy(finalLotSize, _Symbol, currentAsk, buySL, buyTP, "Local VWAP Pullback BUY");
+                   return true;
+                }
+                else if(trendSellOk && pullbackSell && triggerSell && volOk && rsiSellOk && (g_dailySentiment != "BUY_ONLY"))
+                {
+                   double pullbackSL = GetStopLossDistance(_Symbol, prevClose, currentATR);
+                   double pullbackTP = pullbackSL * InpScalpTPMult;
+                   double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+                   double sellSL = currentBid + pullbackSL;
+                   double sellTP = currentBid - pullbackTP;
+                   
+                   double maxRiskSL = NormalizeDouble(currentBid + (2.0 * g_stopLossDist), _Digits);
+                   if(sellSL > maxRiskSL) sellSL = maxRiskSL;
+                   
+                   trade.Sell(finalLotSize, _Symbol, currentBid, sellSL, sellTP, "Local VWAP Pullback SELL");
+                   return true;
+                }
+             }
+          }
+       }
+
        // --- SIDEWAYS RANGE MODE (Limit Orders) ---
        double reversionOffset = (InpTimeframeMode == TF_M1 || (InpTimeframeMode == TF_AUTO && _Period == PERIOD_M1)) ? 0.08 : 0.15;
        
@@ -1719,6 +1947,57 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    else
    {
       // --- TRENDING BREAKOUT MODE ---
+      if(!aiActive && InpUseLocalVolBreakout)
+      {
+         double ema200Val[];
+         ArraySetAsSeries(ema200Val, true);
+         if(CopyBuffer(g_ema200Handle, 0, 1, 1, ema200Val) > 0)
+         {
+            double curr_ema200 = ema200Val[0];
+            double ch_high = GetChannelHigh(InpChannelLength);
+            double ch_low = GetChannelLow(InpChannelLength);
+            
+            double currVol = (double)iVolume(_Symbol, _Period, 1);
+            double volSMA10 = GetVolumeSMA(10);
+            bool volOk = (currVol >= InpVolumeMult1 * volSMA10);
+            
+            bool triggerBuy  = (prevClose > ch_high) && (prevClose >= curr_ema200) && volOk && (g_dailySentiment != "SELL_ONLY");
+            bool triggerSell = (prevClose < ch_low)  && (prevClose < curr_ema200)  && volOk && (g_dailySentiment != "BUY_ONLY");
+            
+            if(triggerBuy)
+            {
+               double donchianSL = GetStopLossDistance(_Symbol, prevClose, currentATR);
+               double donchianTP = donchianSL * InpVolumeBreakTPMult;
+               
+               double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+               double buySL = currentAsk - donchianSL;
+               double buyTP = currentAsk + donchianTP;
+               
+               double maxRiskSL = NormalizeDouble(currentAsk - (2.0 * g_stopLossDist), _Digits);
+               if(buySL < maxRiskSL) buySL = maxRiskSL;
+               
+               trade.Buy(finalLotSize, _Symbol, currentAsk, buySL, buyTP, "Local Vol Breakout BUY");
+               return true;
+            }
+            else if(triggerSell)
+            {
+               double donchianSL = GetStopLossDistance(_Symbol, prevClose, currentATR);
+               double donchianTP = donchianSL * InpVolumeBreakTPMult;
+               
+               double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+               double sellSL = currentBid + donchianSL;
+               double sellTP = currentBid - donchianTP;
+               
+               double maxRiskSL = NormalizeDouble(currentBid + (2.0 * g_stopLossDist), _Digits);
+               if(sellSL > maxRiskSL) sellSL = maxRiskSL;
+               
+               trade.Sell(finalLotSize, _Symbol, currentBid, sellSL, sellTP, "Local Vol Breakout SELL");
+               return true;
+            }
+         }
+         return false;
+      }
+
       if(!aiActive && InpUseLocalDonchianBreakout)
       {
          double ema200Val[];
@@ -1918,10 +2197,11 @@ int OnInit()
    g_rsiHandle = iRSI(_Symbol, _Period, 14, PRICE_CLOSE);
    g_adxHandle = iADX(_Symbol, _Period, 14);
    g_ema200Handle = iMA(_Symbol, _Period, InpEMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   g_ema9Handle   = iMA(_Symbol, _Period, InpEMA9Length, 0, MODE_EMA, PRICE_CLOSE);
    
    if(g_emaHandle == INVALID_HANDLE || g_emaHigherHandle == INVALID_HANDLE || 
       g_atrHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE || g_adxHandle == INVALID_HANDLE ||
-      g_ema200Handle == INVALID_HANDLE)
+      g_ema200Handle == INVALID_HANDLE || g_ema9Handle == INVALID_HANDLE)
    {
       Print("[V10 INIT ERROR] Failed to initialize indicators.");
       return(INIT_FAILED);
@@ -1958,6 +2238,7 @@ void OnDeinit(const int reason)
    IndicatorRelease(g_rsiHandle);
    IndicatorRelease(g_adxHandle);
    IndicatorRelease(g_ema200Handle);
+   IndicatorRelease(g_ema9Handle);
    
    // Delete UI elements
    ObjectDelete(0, "DbPanelBg");
