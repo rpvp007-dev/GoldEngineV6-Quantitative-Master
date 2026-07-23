@@ -3580,7 +3580,7 @@ void ManageSidewaysEscape(bool reversionModeActive)
 void CheckMidCandleTriggers(datetime currentBarTime)
 {
    if(!InpUseAIEngines || !g_eaRunning) return;
-   if(IsNewsBlockoutActive()) return;
+
    if(CountActiveTrades() > 0) return;
    
    if(g_midCandleQueried || (TimeCurrent() - g_lastAICallTime < 30)) return;
@@ -3736,12 +3736,13 @@ void DrawICTVisualBoxes()
    double bearOB_Low = 0.0, bearOB_High = 0.0;
    GetNearestOrderBlocks(bullOB_Low, bullOB_High, bearOB_Low, bearOB_High);
    
-   datetime extendTime = TimeCurrent() + PeriodSeconds(_Period) * 5;
+   datetime currentBarTime = iTime(_Symbol, _Period, 0);
+   datetime extendTime = currentBarTime + PeriodSeconds(_Period) * 8;
    
    if(fvgType != 0)
    {
       string name = StringFormat("GE_FVG_%s", (fvgType == 1)?"BULL":"BEAR");
-      ObjectCreate(0, name, OBJ_RECTANGLE, 0, TimeCurrent() - PeriodSeconds(_Period)*10, fvgLow, extendTime, fvgHigh);
+      ObjectCreate(0, name, OBJ_RECTANGLE, 0, currentBarTime - PeriodSeconds(_Period)*10, fvgLow, extendTime, fvgHigh);
       ObjectSetInteger(0, name, OBJPROP_COLOR, (fvgType == 1) ? C'0x15,0x40,0x80' : C'0x80,0x15,0x40');
       ObjectSetInteger(0, name, OBJPROP_FILL, true);
       ObjectSetInteger(0, name, OBJPROP_BACK, true);
@@ -3750,7 +3751,7 @@ void DrawICTVisualBoxes()
    if(bullOB_High > 0.0)
    {
       string name = "GE_OB_BULL";
-      ObjectCreate(0, name, OBJ_RECTANGLE, 0, TimeCurrent() - PeriodSeconds(_Period)*20, bullOB_Low, extendTime, bullOB_High);
+      ObjectCreate(0, name, OBJ_RECTANGLE, 0, currentBarTime - PeriodSeconds(_Period)*20, bullOB_Low, extendTime, bullOB_High);
       ObjectSetInteger(0, name, OBJPROP_COLOR, C'0x0C,0x40,0x0C');
       ObjectSetInteger(0, name, OBJPROP_FILL, true);
       ObjectSetInteger(0, name, OBJPROP_BACK, true);
@@ -3759,7 +3760,7 @@ void DrawICTVisualBoxes()
    if(bearOB_High > 0.0)
    {
       string name = "GE_OB_BEAR";
-      ObjectCreate(0, name, OBJ_RECTANGLE, 0, TimeCurrent() - PeriodSeconds(_Period)*20, bearOB_Low, extendTime, bearOB_High);
+      ObjectCreate(0, name, OBJ_RECTANGLE, 0, currentBarTime - PeriodSeconds(_Period)*20, bearOB_Low, extendTime, bearOB_High);
       ObjectSetInteger(0, name, OBJPROP_COLOR, C'0x40,0x0C,0x0C');
       ObjectSetInteger(0, name, OBJPROP_FILL, true);
       ObjectSetInteger(0, name, OBJPROP_BACK, true);
@@ -3965,8 +3966,7 @@ void OnTick()
    // Process Sideways Escape
    ManageSidewaysEscape(useReversionMode);
    
-   // Draw FVG & Order Block Visual Boxes
-   DrawICTVisualBoxes();
+
 
    // Check if EA is paused by the on-chart button
    if(!g_eaRunning)
@@ -3980,6 +3980,8 @@ void OnTick()
    
    if(isNewBar)
    {
+      // Draw FVG & Order Block Visual Boxes on new bar close
+      DrawICTVisualBoxes();
       // Draw FVG & Order Block Visual Boxes on new bar close
       DrawICTVisualBoxes();
       if(g_lastBarTime != 0)
