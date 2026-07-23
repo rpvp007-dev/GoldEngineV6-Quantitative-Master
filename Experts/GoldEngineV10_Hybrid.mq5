@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, GoldEngine V10"
 #property link      "https://github.com/rpvp007-dev"
-#property version   "15.00"
+#property version   "16.00"
 
 #include <Trade\Trade.mqh>
 
@@ -26,6 +26,7 @@ input ENUM_TF_MODE InpTimeframeMode = TF_AUTO;    // Target Chart Timeframe Mode
 input group "--- Gemini AI Engine Settings ---"
 input string   InpGeminiAPIKey       = "";      // Gemini API Key (Get from aistudio.google.com)
 input bool     InpUseGeminiAI        = true;    // Use Gemini AI for Trade Decisions
+input int      InpMinConviction      = 50;      // Minimum AI Conviction to trade (0-100)
 
 input group "--- Core Risk Settings ---"
 input double   InpLotSize          = 0.10;     // Fixed Lot Size (If Compounding is disabled)
@@ -139,7 +140,11 @@ double         g_candleTrailBuffer;
 
 // UI controls
 bool           g_eaRunning = true;  // Button state toggle
-string         g_aiDecision = "WAITING"; // Current AI decision state
+
+// AI Conviction Outputs
+string         g_aiDecision = "WAITING";
+int            g_aiConviction = 0;
+string         g_aiReason = "Awaiting setup...";
 
 //+------------------------------------------------------------------+
 //| Determine higher timeframe for trend alignment                  |
@@ -293,18 +298,18 @@ void UpdateButtonState()
 //+------------------------------------------------------------------+
 void CreateInterface()
 {
-   // Redesigned: 350px wide for high-DPI Mac Retina compliance
+   // Redesigned: 350px wide, 310px high to fit Conviction Engine parameters
    int panelWidth  = 350;
-   int panelHeight = 280;
+   int panelHeight = 310;
    int margin      = 25;
    int textX       = 20 + margin;
-   int fontSize    = 8; // Slightly smaller text font to prevent text going out of the box
+   int fontSize    = 8; 
    
-   // 1. Create Background Panel
+   // 1. Create Background Shield
    CreatePanelBg("DbPanelBg", 20, 60, panelWidth, panelHeight, C'20,20,20', C'70,70,70');
    
    // 2. Create Header
-   CreateLabel("DbTitle", textX, 75, "GOLD ENGINE V10 - HYBRID", 10, C'255,179,0', "Segoe UI Semibold");
+   CreateLabel("DbTitle", textX, 75, "GOLD ENGINE V10 - HYBRID PRO", 10, C'255,179,0', "Segoe UI Semibold");
    
    // 3. Create Rows (Clean 18px line height)
    CreateLabel("DbTimeframe", textX, 100, "Chart Timeframe : ", fontSize, clrWhite);
@@ -313,7 +318,11 @@ void CreateInterface()
    CreateLabel("DbATR",       textX, 154, "Current ATR     : ", fontSize, clrWhite);
    CreateLabel("DbMode",      textX, 172, "Active Mode     : ", fontSize, clrWhite);
    CreateLabel("DbSL",        textX, 190, "Stop Loss (ATR) : ", fontSize, clrWhite);
-   CreateLabel("DbOffset",    textX, 208, "Gemini Decision : ", fontSize, clrWhite);
+   
+   // AI Conviction Rows
+   CreateLabel("DbDecision",  textX, 208, "AI Decision     : ", fontSize, clrWhite);
+   CreateLabel("DbConviction",textX, 226, "AI Conviction   : ", fontSize, clrWhite);
+   CreateLabel("DbReason",    textX, 244, "AI Reason       : ", fontSize, clrWhite);
    
    // 4. Create Button (Nested at the bottom of the panel with margins aligned)
    string btnName = "BtnEAToggle";
@@ -322,7 +331,7 @@ void CreateInterface()
       ObjectCreate(0, btnName, OBJ_BUTTON, 0, 0, 0);
    }
    ObjectSetInteger(0, btnName, OBJPROP_XDISTANCE, textX);
-   ObjectSetInteger(0, btnName, OBJPROP_YDISTANCE, 290);
+   ObjectSetInteger(0, btnName, OBJPROP_YDISTANCE, 320); // Moved down to fit rows
    ObjectSetInteger(0, btnName, OBJPROP_XSIZE, panelWidth - (margin * 2));
    ObjectSetInteger(0, btnName, OBJPROP_YSIZE, 32);
    ObjectSetInteger(0, btnName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -340,29 +349,28 @@ void CreateInterface()
 //+------------------------------------------------------------------+
 void DrawChartStatus(double currentADX, double currentATR, bool reversionModeActive)
 {
-   // Re-create elements only if they are missing
    if(ObjectFind(0, "DbPanelBg") < 0)
    {
       CreateInterface();
    }
    
-   // Handle PAUSED layout state
    if(!g_eaRunning)
    {
       ObjectSetString(0, "DbTimeframe", OBJPROP_TEXT, "         SYSTEM PAUSED         ");
-      ObjectSetInteger(0, "DbTimeframe", OBJPROP_COLOR, C'239,83,80'); // Soft Red
+      ObjectSetInteger(0, "DbTimeframe", OBJPROP_COLOR, C'239,83,80'); 
       
       ObjectSetString(0, "DbLotSize",   OBJPROP_TEXT, "No new trades allowed.");
       ObjectSetString(0, "DbADX",       OBJPROP_TEXT, "Active positions will");
       ObjectSetString(0, "DbATR",       OBJPROP_TEXT, "still be managed safely.");
       ObjectSetString(0, "DbMode",      OBJPROP_TEXT, "");
       ObjectSetString(0, "DbSL",        OBJPROP_TEXT, "");
-      ObjectSetString(0, "DbOffset",    OBJPROP_TEXT, "");
+      ObjectSetString(0, "DbDecision",  OBJPROP_TEXT, "");
+      ObjectSetString(0, "DbConviction",OBJPROP_TEXT, "");
+      ObjectSetString(0, "DbReason",    OBJPROP_TEXT, "");
       ChartRedraw();
       return;
    }
    
-   // Load regular status data
    string tfName = "UNKNOWN";
    ENUM_TIMEFRAMES period = _Period;
    if(period == PERIOD_M1) tfName = "M1 (1-Minute)";
@@ -381,23 +389,48 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
    ObjectSetString(0, "DbMode",      OBJPROP_TEXT, "Active Mode     : " + modeStr);
    ObjectSetString(0, "DbSL",        OBJPROP_TEXT, StringFormat("Stop Loss (ATR) : %.2f $", g_stopLossDist));
    
-   // Display Gemini Decision / Status
-   string geminiStatus = "Gemini Decision : " + g_aiDecision;
-   ObjectSetString(0, "DbOffset",    OBJPROP_TEXT, geminiStatus);
+   // AI Dashboard outputs
+   ObjectSetString(0, "DbDecision",  OBJPROP_TEXT, "AI Decision     : " + g_aiDecision);
    
-   // Highlight Gemini Status Color
+   string convictionStr = (g_aiDecision == "LOCAL RULES" || g_aiDecision == "WAITING") ? "N/A" : StringFormat("%d%%", g_aiConviction);
+   if(g_aiConviction >= 80) convictionStr += " (HIGH CONFIDENCE)";
+   else if(g_aiConviction >= 50) convictionStr += " (MEDIUM CONFIDENCE)";
+   else if(g_aiConviction > 0) convictionStr += " (LOW CONFIDENCE - BLOCKED)";
+   ObjectSetString(0, "DbConviction", OBJPROP_TEXT, "AI Conviction   : " + convictionStr);
+   
+   // Handle text wrapping for Reason (truncate if longer than 32 chars)
+   string cleanReason = g_aiReason;
+   if(StringLen(cleanReason) > 32)
+   {
+      cleanReason = StringSubstr(cleanReason, 0, 29) + "...";
+   }
+   ObjectSetString(0, "DbReason",    OBJPROP_TEXT, "AI Reason       : " + cleanReason);
+   
+   // Color coding for AI Decision
    if(g_aiDecision == "BUY")
-      ObjectSetInteger(0, "DbOffset", OBJPROP_COLOR, C'76,175,80');  // green
+      ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, C'76,175,80');  // Green
    else if(g_aiDecision == "SELL")
-      ObjectSetInteger(0, "DbOffset", OBJPROP_COLOR, C'239,83,80'); // red
+      ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, C'239,83,80'); // Red
+   else if(g_aiDecision == "HOLD")
+      ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, C'255,179,0'); // Yellow
    else
-      ObjectSetInteger(0, "DbOffset", OBJPROP_COLOR, C'255,179,0'); // amber
-   
+      ObjectSetInteger(0, "DbDecision", OBJPROP_COLOR, clrWhite);
+      
+   // Color coding for AI Conviction
+   if(g_aiDecision == "LOCAL RULES" || g_aiDecision == "WAITING")
+      ObjectSetInteger(0, "DbConviction", OBJPROP_COLOR, clrWhite);
+   else if(g_aiConviction >= 80)
+      ObjectSetInteger(0, "DbConviction", OBJPROP_COLOR, C'76,175,80'); // Green
+   else if(g_aiConviction >= 50)
+      ObjectSetInteger(0, "DbConviction", OBJPROP_COLOR, C'255,179,0'); // Yellow
+   else
+      ObjectSetInteger(0, "DbConviction", OBJPROP_COLOR, C'239,83,80'); // Red
+      
    // Highlight Active Mode Color
    if(reversionModeActive)
-      ObjectSetInteger(0, "DbMode", OBJPROP_COLOR, C'255,179,0'); // Amber Orange
+      ObjectSetInteger(0, "DbMode", OBJPROP_COLOR, C'255,179,0'); 
    else
-      ObjectSetInteger(0, "DbMode", OBJPROP_COLOR, C'76,175,80');  // Green
+      ObjectSetInteger(0, "DbMode", OBJPROP_COLOR, C'76,175,80');  
       
    ChartRedraw();
 }
@@ -408,7 +441,6 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
 int CountActiveTrades()
 {
    int count = 0;
-   // 1. Count positions
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
@@ -416,7 +448,6 @@ int CountActiveTrades()
          count++;
       }
    }
-   // 2. Count pending orders
    for(int i = OrdersTotal() - 1; i >= 0; i--)
    {
       ulong ticket = OrderGetTicket(i);
@@ -439,37 +470,29 @@ void CalculateDynamicSLAndLots()
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    if(balance <= 0.0) balance = AccountInfoDouble(ACCOUNT_EQUITY);
    
-   // 1. Fetch current ATR (using safe initialized handle)
    double atrVal[];
    ArraySetAsSeries(atrVal, true);
-   double currentATR = 0.80; // default fallback
+   double currentATR = 0.80; 
    if(g_atrHandle != INVALID_HANDLE && CopyBuffer(g_atrHandle, 0, 1, 1, atrVal) > 0)
    {
       currentATR = atrVal[0];
    }
    
-   // 2. Calculate dynamic Entry Offset
    if(InpUseATROffset)
    {
       g_priceOffset = NormalizeDouble(g_atrOffsetMultiplier * currentATR, _Digits);
-      
-      // Set minimum safe offset limits per timeframe
       double minSafeOffset = (InpTimeframeMode == TF_M1 || (InpTimeframeMode == TF_AUTO && _Period == PERIOD_M1)) ? 0.10 : 0.20;
       if(g_priceOffset < minSafeOffset) g_priceOffset = minSafeOffset;
    }
    
-   // 3. Calculate Stop Loss Distance
    if(InpUseATRStopLoss)
    {
       g_stopLossDist = NormalizeDouble(g_atrSLMultiplier * currentATR, _Digits);
-      
-      // Prevent Stop Loss from becoming too narrow
       double minSafeSL = (InpTimeframeMode == TF_M1 || (InpTimeframeMode == TF_AUTO && _Period == PERIOD_M1)) ? 0.80 : 1.30;
       if(g_stopLossDist < minSafeSL) g_stopLossDist = minSafeSL;
    }
    else
    {
-      // Use fallback distances from the selected presets
       ENUM_TIMEFRAMES period = _Period;
       if(period == PERIOD_M1)       g_stopLossDist = 1.30;
       else if(period == PERIOD_M5)  g_stopLossDist = 2.00;
@@ -478,14 +501,12 @@ void CalculateDynamicSLAndLots()
       else                          g_stopLossDist = InpStopLossDist;
    }
    
-   // 4. Calculate Target Risk in Dollars (scaling with compounding if enabled)
    double dollarRisk = InpTargetRiskUSD;
    if(InpEnableCompounding)
    {
       dollarRisk = (balance / InpBalanceStep) * InpTargetRiskUSD;
    }
    
-   // 5. Calculate Lot Size to match target dollar risk exactly
    double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    
@@ -495,10 +516,9 @@ void CalculateDynamicSLAndLots()
    }
    else
    {
-      g_lotSize = InpLotSize; // fallback
+      g_lotSize = InpLotSize; 
    }
    
-   // Normalize lot size
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
@@ -513,7 +533,6 @@ void CalculateDynamicSLAndLots()
 //+------------------------------------------------------------------+
 void LoadTimeframePresets()
 {
-   // Determine active mode (Auto-detect from chart period if set to TF_AUTO)
    ENUM_TF_MODE activeMode = InpTimeframeMode;
    if(InpTimeframeMode == TF_AUTO)
    {
@@ -522,14 +541,13 @@ void LoadTimeframePresets()
       else if(period == PERIOD_M5)  activeMode = TF_M5;
       else if(period == PERIOD_M15) activeMode = TF_M15;
       else if(period == PERIOD_H1)  activeMode = TF_H1;
-      else                          activeMode = TF_M1; // fallback
+      else                          activeMode = TF_M1; 
    }
 
-   // 1. Configure timeframe-adapted values first
    if(activeMode == TF_M1)
    {
-      g_minADX             = 22.0; // Higher ADX needed for fast M1 breakouts
-      g_atrSLMultiplier    = 1.6;  // More breathing room on M1 to clear spread
+      g_minADX             = 22.0; 
+      g_atrSLMultiplier    = 1.6;  
       g_atrOffsetMultiplier = 0.20;
       g_candleTrailBuffer  = 0.05;
    }
@@ -549,12 +567,12 @@ void LoadTimeframePresets()
    }
    else if(activeMode == TF_H1)
    {
-      g_minADX             = 18.0; // Smooth macro trends
+      g_minADX             = 18.0; 
       g_atrSLMultiplier    = 1.4;
       g_atrOffsetMultiplier = 0.12;
       g_candleTrailBuffer  = 0.50;
    }
-   else // TF_CUSTOM
+   else 
    {
       g_minADX             = InpMinADX;
       g_atrSLMultiplier    = InpATRMultiplier;
@@ -562,10 +580,8 @@ void LoadTimeframePresets()
       g_candleTrailBuffer  = InpCandleTrailBuffer;
    }
 
-   // 2. Calculate dynamic SL and lot size
    CalculateDynamicSLAndLots();
    
-   // 3. Load target profit trailing presets
    if(activeMode == TF_M1)
    {
       if(!InpUseATROffset) g_priceOffset = 0.25;
@@ -581,7 +597,7 @@ void LoadTimeframePresets()
       g_stage2Distance   = 0.40;
       g_enableTimeDecay  = true;
       g_maxHoldMinutes   = 2;
-      g_minATR           = 0.35; // Quiet M1 filter
+      g_minATR           = 0.35; 
    }
    else if(activeMode == TF_M5)
    {
@@ -634,7 +650,7 @@ void LoadTimeframePresets()
       g_maxHoldMinutes   = 180;
       g_minATR           = 3.00;
    }
-   else // TF_CUSTOM
+   else 
    {
       g_takeProfitDist   = InpTakeProfitDist;
       g_enableBE         = InpEnableBE;
@@ -650,15 +666,8 @@ void LoadTimeframePresets()
       g_maxHoldMinutes   = InpMaxHoldMinutes;
       g_minATR           = InpMinATR;
       
-      if(!InpUseATROffset)
-      {
-         g_priceOffset = InpPriceOffset;
-      }
-      
-      if(!InpUseATRStopLoss)
-      {
-         g_stopLossDist = InpStopLossDist;
-      }
+      if(!InpUseATROffset)  g_priceOffset = InpPriceOffset;
+      if(!InpUseATRStopLoss) g_stopLossDist = InpStopLossDist;
    }
 }
 
@@ -710,7 +719,6 @@ void ManageCandleCloseLossCutting()
             
             if(type == POSITION_TYPE_BUY)
             {
-               // 1. Rejection Exit: Bearish Close
                if(InpEnableRejectionExit && prevClose < prevOpen)
                {
                   Print(StringFormat("[V10 SOFT STOP] Closing BUY ticket #%I64u due to Bearish Close.", ticket));
@@ -718,7 +726,6 @@ void ManageCandleCloseLossCutting()
                   continue;
                }
                
-               // 2. Trail SL by Candle Low
                if(InpEnableCandleTrail)
                {
                   double targetSL = NormalizeDouble(prevLow - g_candleTrailBuffer, _Digits);
@@ -737,7 +744,6 @@ void ManageCandleCloseLossCutting()
             }
             else if(type == POSITION_TYPE_SELL)
             {
-               // 1. Rejection Exit: Bullish Close
                if(InpEnableRejectionExit && prevClose > prevOpen)
                {
                   Print(StringFormat("[V10 SOFT STOP] Closing SELL ticket #%I64u due to Bullish Close.", ticket));
@@ -745,7 +751,6 @@ void ManageCandleCloseLossCutting()
                   continue;
                }
                
-               // 2. Trail SL by Candle High
                if(InpEnableCandleTrail)
                {
                   double targetSL = NormalizeDouble(prevHigh + g_candleTrailBuffer, _Digits);
@@ -790,51 +795,42 @@ void ManageActivePositions()
             double currentVolume = PositionGetDouble(POSITION_VOLUME);
             datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
             
-            // --- 1. TIME DECAY EXIT ---
             if(g_enableTimeDecay)
             {
                int durationSec = (int)(TimeCurrent() - openTime);
                if(durationSec >= g_maxHoldMinutes * 60)
                {
                   trade.PositionClose(ticket);
-                  continue; // Position closed, skip SL updates
+                  continue; 
                }
             }
             
-            // --- 2. PROGRESSIVE SL LOCKING & SCALE-OUT ---
             if(type == POSITION_TYPE_BUY)
             {
                double currentProfit = currentBid - entryPrice;
                double targetSL = 0.0;
                
-               // Stage 3: Tight Trail (Halfway/Near Target)
                if(g_enableStage2 && currentProfit >= g_stage2Trigger)
                {
                   targetSL = NormalizeDouble(currentBid - g_stage2Distance, _Digits);
                }
-               // Stage 2: Wide Trail (Breathing room)
                else if(g_enableStage1 && currentProfit >= g_stage1Trigger)
                {
                   targetSL = NormalizeDouble(currentBid - g_stage1Distance, _Digits);
                }
-               // Stage 1: Initial Break-Even + Partial Profit Lock
                else if(g_enableBE && currentProfit >= g_beTrigger)
                {
-                  // 1. Execute Partial Close of 50% of the trade
                   if(InpEnablePartialClose && currentVolume >= g_lotSize)
                   {
                      double closeLots = NormalizeDouble(g_lotSize / 2.0, 2);
                      if(closeLots > 0.0)
                      {
                         trade.PositionClosePartial(ticket, closeLots);
-                        Print(StringFormat("[V10 SCALE-OUT] Closed 50%% (%.2f lots) on BUY ticket #%I64u", closeLots, ticket));
                      }
                   }
-                  // 2. Move SL to BE
                   targetSL = NormalizeDouble(entryPrice + g_beOffset, _Digits);
                }
                
-               // Modify SL if target is valid and moves the SL higher
                if(targetSL > 0.0 && (targetSL > currentSL || currentSL == 0.0))
                {
                   if(currentBid - targetSL >= stopsLevel)
@@ -848,34 +844,27 @@ void ManageActivePositions()
                double currentProfit = entryPrice - currentAsk;
                double targetSL = 0.0;
                
-               // Stage 3: Tight Trail (Halfway/Near Target)
                if(g_enableStage2 && currentProfit >= g_stage2Trigger)
                {
                   targetSL = NormalizeDouble(currentAsk + g_stage2Distance, _Digits);
                }
-               // Stage 2: Wide Trail (Breathing room)
                else if(g_enableStage1 && currentProfit >= g_stage1Trigger)
                {
                   targetSL = NormalizeDouble(currentAsk + g_stage1Distance, _Digits);
                }
-               // Stage 1: Initial Break-Even + Partial Profit Lock
                else if(g_enableBE && currentProfit >= g_beTrigger)
                {
-                  // 1. Execute Partial Close of 50% of the trade
                   if(InpEnablePartialClose && currentVolume >= g_lotSize)
                   {
                      double closeLots = NormalizeDouble(g_lotSize / 2.0, 2);
                      if(closeLots > 0.0)
                      {
                         trade.PositionClosePartial(ticket, closeLots);
-                        Print(StringFormat("[V10 SCALE-OUT] Closed 50%% (%.2f lots) on SELL ticket #%I64u", closeLots, ticket));
                      }
                   }
-                  // 2. Move SL to BE
                   targetSL = NormalizeDouble(entryPrice - g_beOffset, _Digits);
                }
                
-               // Modify SL if target is valid and moves the SL lower
                if(targetSL > 0.0 && (targetSL < currentSL || currentSL == 0.0))
                {
                   if(targetSL - currentAsk >= stopsLevel)
@@ -890,46 +879,78 @@ void ManageActivePositions()
 }
 
 //+------------------------------------------------------------------+
-//| Simple string parsing helper to extract decision from JSON       |
+//| Simple string parsing helper to extract value by key from JSON   |
 //+------------------------------------------------------------------+
-string ParseGeminiResponse(string json)
+string ExtractJSONValue(string json, string key)
 {
-   int buyIdx = StringFind(json, "BUY");
-   int sellIdx = StringFind(json, "SELL");
-   int holdIdx = StringFind(json, "HOLD");
+   string searchKey = "\"" + key + "\"";
+   int startIdx = StringFind(json, searchKey);
+   if(startIdx < 0) return "";
    
-   if(buyIdx >= 0 && (sellIdx < 0 || buyIdx < sellIdx) && (holdIdx < 0 || buyIdx < holdIdx))
-      return "BUY";
-   if(sellIdx >= 0 && (buyIdx < 0 || sellIdx < buyIdx) && (holdIdx < 0 || sellIdx < holdIdx))
-      return "SELL";
-   if(holdIdx >= 0)
-      return "HOLD";
-      
-   return "HOLD"; // default fallback
+   int colonIdx = StringFind(json, ":", startIdx + StringLen(searchKey));
+   if(colonIdx < 0) return "";
+   
+   int valStart = colonIdx + 1;
+   while(valStart < StringLen(json) && 
+         (StringSubstr(json, valStart, 1) == " " || 
+          StringSubstr(json, valStart, 1) == "\t" || 
+          StringSubstr(json, valStart, 1) == "\r" || 
+          StringSubstr(json, valStart, 1) == "\n" || 
+          StringSubstr(json, valStart, 1) == "\"" ||
+          StringSubstr(json, valStart, 1) == "'"))
+   {
+      valStart++;
+   }
+   
+   int valEnd = valStart;
+   while(valEnd < StringLen(json))
+   {
+      string charStr = StringSubstr(json, valEnd, 1);
+      if(charStr == "\"" || charStr == "'" || charStr == "," || charStr == "}" || charStr == "\r" || charStr == "\n")
+      {
+         break;
+      }
+      valEnd++;
+   }
+   
+   if(valEnd > valStart)
+   {
+      return StringSubstr(json, valStart, valEnd - valStart);
+   }
+   return "";
 }
 
 //+------------------------------------------------------------------+
-//| Query Google Gemini 1.5 Flash API for market direction decision  |
+//| Query Google Gemini for market direction and conviction score    |
 //+------------------------------------------------------------------+
-string GetGeminiDecision(double adx, double atr, double rsi, double ema)
+bool QueryGeminiConvictionEngine(double adx, double atr, double rsi, double ema)
 {
    if(InpGeminiAPIKey == "" || InpGeminiAPIKey == "PASTE_YOUR_API_KEY_HERE")
    {
-      return "NO_API_KEY";
+      g_aiDecision = "LOCAL RULES";
+      g_aiConviction = 0;
+      g_aiReason = "No API Key configured.";
+      return false;
+   }
+   
+   // Gather candle history for smart price action reading (last 5 candles)
+   string priceHistory = "";
+   for(int i = 5; i >= 1; i--)
+   {
+      priceHistory += StringFormat("[Bar %d: O=%.2f, H=%.2f, L=%.2f, C=%.2f, V=%I64d] ", 
+         i, iOpen(_Symbol, _Period, i), iHigh(_Symbol, _Period, i), iLow(_Symbol, _Period, i), iClose(_Symbol, _Period, i), iVolume(_Symbol, _Period, i));
    }
    
    double prevClose = iClose(_Symbol, _Period, 1);
-   double prevOpen  = iOpen(_Symbol, _Period, 1);
-   double prevHigh  = iHigh(_Symbol, _Period, 1);
-   double prevLow   = iLow(_Symbol, _Period, 1);
    
-   // Formulate prompt using single quotes for the instruction to avoid JSON escaping errors
+   // Formulate an intelligent prompt describing the complete market picture
    string prompt = StringFormat(
-      "Gold (XAUUSD) M1 candle closed. Metrics: Open=%.2f, Close=%.2f, High=%.2f, Low=%.2f. "+
-      "Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA(50)=%.2f. "+
-      "As a quant, evaluate if this price action is a breakout or reversion. "+
-      "Respond strictly with a JSON object format: { 'decision': 'BUY' } or { 'decision': 'SELL' } or { 'decision': 'HOLD' }. Do not write any other text.",
-      prevOpen, prevClose, prevHigh, prevLow, adx, atr, rsi, ema
+      "Gold (XAUUSD) M1 setup analysis. Spread=%.2f. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f. "+
+      "Price History: %s. "+
+      "As a professional quant, determine the highest probability direction. "+
+      "Respond strictly with a JSON object containing: 'decision' (BUY, SELL, or HOLD), 'conviction' (integer confidence score 0 to 100), and 'reason' (short 10-word summary). "+
+      "Example output format: { 'decision': 'BUY', 'conviction': 85, 'reason': 'Strong momentum cross' }. Do not write markdown blocks or any other text.",
+      GetSmoothedSpread(), prevClose, adx, atr, rsi, ema, priceHistory
    );
    
    string requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]}";
@@ -944,23 +965,35 @@ string GetGeminiDecision(double adx, double atr, double rsi, double ema)
    ResetLastError();
    int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
    
-   if(res == -1)
-   {
-      Print("[Gemini WebRequest Failed] Error code: ", GetLastError());
-      return "ERROR";
-   }
-   
    if(res != 200)
    {
-      string errorResponse = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-      Print("[Gemini HTTP Error] Status: ", res, ", Content: ", errorResponse);
-      return "ERROR";
+      Print("[Conviction Engine Error] HTTP Response: ", res);
+      g_aiDecision = "API ERROR";
+      g_aiConviction = 0;
+      g_aiReason = "Gemini API connection failed.";
+      return false;
    }
    
    string responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
-   string decision = ParseGeminiResponse(responseText);
    
-   return decision;
+   // Extract values cleanly using our JSON parser
+   string rawDecision = ExtractJSONValue(responseText, "decision");
+   string rawConviction = ExtractJSONValue(responseText, "conviction");
+   string rawReason = ExtractJSONValue(responseText, "reason");
+   
+   // Clean decision string
+   if(StringFind(rawDecision, "BUY") >= 0) g_aiDecision = "BUY";
+   else if(StringFind(rawDecision, "SELL") >= 0) g_aiDecision = "SELL";
+   else if(StringFind(rawDecision, "HOLD") >= 0) g_aiDecision = "HOLD";
+   else g_aiDecision = "HOLD";
+   
+   g_aiConviction = (int)StringToInteger(rawConviction);
+   if(g_aiConviction < 0) g_aiConviction = 0;
+   if(g_aiConviction > 100) g_aiConviction = 100;
+   
+   g_aiReason = (rawReason != "") ? rawReason : "AI analyzed successfully.";
+   
+   return true;
 }
 
 //+------------------------------------------------------------------+
@@ -1029,7 +1062,6 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       isMomentumHour = true;
    }
 
-   // Determine if we should trade reversion or breakout
    bool useReversionMode = false;
    if(InpEnableHybridMode)
    {
@@ -1047,24 +1079,50 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       }
    }
 
-   // --- Gemini AI Decision Logic (If Enabled & Key is Pasted) ---
+   // --- Query the AI Conviction Engine ---
    bool aiActive = false;
-   if(InpUseGeminiAI && InpGeminiAPIKey != "" && InpGeminiAPIKey != "PASTE_YOUR_API_KEY_HERE")
+   if(InpUseGeminiAI)
    {
-      g_aiDecision = GetGeminiDecision(currentADX, currentATR, currentRSI, currentEMA);
-      aiActive = (g_aiDecision == "BUY" || g_aiDecision == "SELL" || g_aiDecision == "HOLD");
+      aiActive = QueryGeminiConvictionEngine(currentADX, currentATR, currentRSI, currentEMA);
    }
    else
    {
       g_aiDecision = "LOCAL RULES";
+      g_aiConviction = 0;
+      g_aiReason = "AI Engine is disabled.";
    }
+
+   // Dynamic Risk Scaling factor based on conviction
+   double convictionMultiplier = 1.0;
+   if(aiActive)
+   {
+      // Block trades below the threshold
+      if(g_aiConviction < InpMinConviction)
+      {
+         Print(StringFormat("[Conviction Engine Blocked] Score %d is below the minimum threshold %d. Reason: %s", 
+            g_aiConviction, InpMinConviction, g_aiReason));
+         g_aiDecision = "BLOCKED";
+         DrawChartStatus(currentADX, currentATR, useReversionMode);
+         return false; 
+      }
+      
+      // Scale position size dynamically:
+      // High Conviction (80+): 100% size
+      // Medium Conviction (50-79): 50% size
+      if(g_aiConviction < 80)
+      {
+         convictionMultiplier = 0.50;
+      }
+   }
+
+   double finalLotSize = NormalizeDouble(g_lotSize * convictionMultiplier, 2);
+   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   if(finalLotSize < minLot) finalLotSize = minLot;
 
    // Place Orders
    if(useReversionMode)
    {
       // --- SIDEWAYS RANGE MODE (Limit Orders) ---
-      // If AI is active, place orders ONLY in the direction recommended by Gemini!
-      // Gemini Buy -> places Buy Limit at support. Gemini Sell -> places Sell Limit at resistance.
       double reversionOffset = (InpTimeframeMode == TF_M1 || (InpTimeframeMode == TF_AUTO && _Period == PERIOD_M1)) ? 0.08 : 0.15;
       
       bool placeBuy = (!aiActive || g_aiDecision == "BUY");
@@ -1075,7 +1133,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          double buyLimitPrice  = NormalizeDouble(prevLow - reversionOffset, _Digits);
          double buySL          = NormalizeDouble(buyLimitPrice - g_stopLossDist, _Digits);
          double buyTP          = (g_takeProfitDist > 0.0) ? NormalizeDouble(buyLimitPrice + g_takeProfitDist, _Digits) : 0.0;
-         trade.BuyLimit(g_lotSize, buyLimitPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "Buy Limit Reversion");
+         trade.BuyLimit(finalLotSize, buyLimitPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "AI Buy Limit Reversion");
       }
       
       if(placeSell)
@@ -1083,7 +1141,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          double sellLimitPrice = NormalizeDouble(prevHigh + reversionOffset, _Digits);
          double sellSL         = NormalizeDouble(sellLimitPrice + g_stopLossDist, _Digits);
          double sellTP         = (g_takeProfitDist > 0.0) ? NormalizeDouble(sellLimitPrice - g_takeProfitDist, _Digits) : 0.0;
-         trade.SellLimit(g_lotSize, sellLimitPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "Sell Limit Reversion");
+         trade.SellLimit(finalLotSize, sellLimitPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AI Sell Limit Reversion");
       }
       
       g_lastOrderPlacedBarTime = currentBarTime;
@@ -1109,7 +1167,6 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       bool allowBuy = true;
       bool allowSell = true;
       
-      // If AI is active, override local indicators and use Gemini's directional analysis
       if(aiActive)
       {
          allowBuy  = (g_aiDecision == "BUY");
@@ -1117,7 +1174,6 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       }
       else
       {
-         // Fallback to local indicators
          if(InpUseEMAFilter)
          {
             allowBuy = (prevClose > currentEMA);
@@ -1151,7 +1207,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          double buySL         = NormalizeDouble(buyStopPrice - g_stopLossDist, _Digits);
          double buyTP         = (g_takeProfitDist > 0.0) ? NormalizeDouble(buyStopPrice + g_takeProfitDist, _Digits) : 0.0;
          
-         trade.BuyStop(g_lotSize, buyStopPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "Buy Stop Breakout");
+         trade.BuyStop(finalLotSize, buyStopPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "AI Buy Stop Breakout");
          orderPlaced = true;
       }
       
@@ -1161,7 +1217,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
          double sellSL        = NormalizeDouble(sellStopPrice + g_stopLossDist, _Digits);
          double sellTP        = (g_takeProfitDist > 0.0) ? NormalizeDouble(sellStopPrice - g_takeProfitDist, _Digits) : 0.0;
          
-         trade.SellStop(g_lotSize, sellStopPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "Sell Stop Breakout");
+         trade.SellStop(finalLotSize, sellStopPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AI Sell Stop Breakout");
          orderPlaced = true;
       }
       
@@ -1214,7 +1270,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Comment(""); // Clear chart comments
+   Comment(""); 
    IndicatorRelease(g_emaHandle);
    IndicatorRelease(g_emaHigherHandle);
    IndicatorRelease(g_atrHandle);
@@ -1230,7 +1286,9 @@ void OnDeinit(const int reason)
    ObjectDelete(0, "DbATR");
    ObjectDelete(0, "DbMode");
    ObjectDelete(0, "DbSL");
-   ObjectDelete(0, "DbOffset");
+   ObjectDelete(0, "DbDecision");
+   ObjectDelete(0, "DbConviction");
+   ObjectDelete(0, "DbReason");
    ObjectDelete(0, "BtnEAToggle");
 }
 
