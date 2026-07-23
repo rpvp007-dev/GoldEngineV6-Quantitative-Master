@@ -488,13 +488,33 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
    else
       ObjectSetInteger(0, "DbMode", OBJPROP_COLOR, C'76,175,80');
        
-   double nearestHigh = 0.0;
-   double nearestLow = 0.0;
+   double nearestHighs[];
+   double nearestLows[];
    string tempStr = "";
-   GetUntestedMagnets(tempStr, nearestHigh, nearestLow);
-    
-   DrawMagnetLine("MagnetHighLine", nearestHigh, C'255,215,0'); // Gold
-   DrawMagnetLine("MagnetLowLine", nearestLow, C'0,255,255');   // Aqua
+   GetUntestedMagnets(nearestHighs, nearestLows, tempStr);
+   
+   // Clean up any old lines first
+   for(int i = 1; i <= 3; i++)
+   {
+      ObjectDelete(0, "MagnetHighLine_" + (string)i);
+      ObjectDelete(0, "MagnetLowLine_" + (string)i);
+   }
+   
+   // Draw High Magnets (closest to furthest)
+   color goldColors[3] = { C'255,215,0', C'218,165,32', C'184,134,11' }; // Gold, Goldenrod, Dark Goldenrod
+   int highCount = ArraySize(nearestHighs);
+   for(int i = 0; i < highCount; i++)
+   {
+      DrawMagnetLine("MagnetHighLine_" + (string)(i+1), nearestHighs[i], goldColors[i]);
+   }
+   
+   // Draw Low Magnets (closest to furthest)
+   color aquaColors[3] = { C'0,255,255', C'72,209,204', C'32,178,170' }; // Aqua, Medium Turquoise, Light Sea Green
+   int lowCount = ArraySize(nearestLows);
+   for(int i = 0; i < lowCount; i++)
+   {
+      DrawMagnetLine("MagnetLowLine_" + (string)(i+1), nearestLows[i], aquaColors[i]);
+   }
 
    ChartRedraw();
 }
@@ -1429,10 +1449,10 @@ double GetDailyVWAP()
 //+------------------------------------------------------------------+
 //| Get Untested Swing High/Low Magnets and Draw them on chart       |
 //+------------------------------------------------------------------+
-void GetUntestedMagnets(string &outputStr, double &nearestHigh, double &nearestLow)
+void GetUntestedMagnets(double &nearestHighs[], double &nearestLows[], string &outputStr)
 {
-   nearestHigh = 0.0;
-   nearestLow = 0.0;
+   ArrayResize(nearestHighs, 0);
+   ArrayResize(nearestLows, 0);
    outputStr = "";
    
    int lookback = 150;
@@ -1448,99 +1468,103 @@ void GetUntestedMagnets(string &outputStr, double &nearestHigh, double &nearestL
       return;
    }
    
-   double untestedHighs[];
-   double untestedLows[];
-   int highAges[];
-   int lowAges[];
-   
-   ArrayResize(untestedHighs, 0);
-   ArrayResize(untestedLows, 0);
-   ArrayResize(highAges, 0);
-   ArrayResize(lowAges, 0);
-   
    double currentPrice = iClose(_Symbol, _Period, 1);
    
-   // Find fractal swing highs/lows
+   double rawHighs[];
+   int rawHighAges[];
+   double rawLows[];
+   int rawLowAges[];
+   
+   ArrayResize(rawHighs, 0);
+   ArrayResize(rawHighAges, 0);
+   ArrayResize(rawLows, 0);
+   ArrayResize(rawLowAges, 0);
+   
+   // Find swing highs/lows
    for(int i = 2; i < lookback - 2; i++)
    {
-      // Swing High: higher than 2 left and 2 right
       if(highs[i] > highs[i-1] && highs[i] > highs[i-2] &&
          highs[i] > highs[i+1] && highs[i] > highs[i+2])
       {
          bool tested = false;
          for(int k = 1; k < i; k++)
          {
-            if(highs[k] > highs[i])
-            {
-               tested = true;
-               break;
-            }
+            if(highs[k] > highs[i]) { tested = true; break; }
          }
-         if(!tested)
+         if(!tested && highs[i] > currentPrice)
          {
-            int sz = ArraySize(untestedHighs);
-            ArrayResize(untestedHighs, sz + 1);
-            ArrayResize(highAges, sz + 1);
-            untestedHighs[sz] = highs[i];
-            highAges[sz] = i + 1;
+            int sz = ArraySize(rawHighs);
+            ArrayResize(rawHighs, sz + 1);
+            ArrayResize(rawHighAges, sz + 1);
+            rawHighs[sz] = highs[i];
+            rawHighAges[sz] = i + 1;
          }
       }
       
-      // Swing Low: lower than 2 left and 2 right
       if(lows[i] < lows[i-1] && lows[i] < lows[i-2] &&
          lows[i] < lows[i+1] && lows[i] < lows[i+2])
       {
          bool tested = false;
          for(int k = 1; k < i; k++)
          {
-            if(lows[k] < lows[i])
-            {
-               tested = true;
-               break;
-            }
+            if(lows[k] < lows[i]) { tested = true; break; }
          }
-         if(!tested)
+         if(!tested && lows[i] < currentPrice)
          {
-            int sz = ArraySize(untestedLows);
-            ArrayResize(untestedLows, sz + 1);
-            ArrayResize(lowAges, sz + 1);
-            untestedLows[sz] = lows[i];
-            lowAges[sz] = i + 1;
+            int sz = ArraySize(rawLows);
+            ArrayResize(rawLows, sz + 1);
+            ArrayResize(rawLowAges, sz + 1);
+            rawLows[sz] = lows[i];
+            rawLowAges[sz] = i + 1;
          }
       }
    }
    
-   double minHighDiff = 999999.0;
-   double minLowDiff = 999999.0;
-   string highsDesc = "";
-   string lowsDesc = "";
-   
-   for(int i = 0; i < ArraySize(untestedHighs); i++)
+   // Sort rawHighs ascending (bubble sort)
+   int numHighs = ArraySize(rawHighs);
+   for(int i = 0; i < numHighs - 1; i++)
    {
-      double diff = untestedHighs[i] - currentPrice;
-      if(diff > 0.0 && diff < minHighDiff)
+      for(int j = i + 1; j < numHighs; j++)
       {
-         minHighDiff = diff;
-         nearestHigh = untestedHighs[i];
-      }
-      if(i < 3)
-      {
-         highsDesc += StringFormat("[Price=%.2f, Age=%d bars, Dist=%.2f] ", untestedHighs[i], highAges[i], diff);
+         if(rawHighs[i] > rawHighs[j])
+         {
+            double tempP = rawHighs[i]; rawHighs[i] = rawHighs[j]; rawHighs[j] = tempP;
+            int tempA = rawHighAges[i]; rawHighAges[i] = rawHighAges[j]; rawHighAges[j] = tempA;
+         }
       }
    }
    
-   for(int i = 0; i < ArraySize(untestedLows); i++)
+   // Sort rawLows descending
+   int numLows = ArraySize(rawLows);
+   for(int i = 0; i < numLows - 1; i++)
    {
-      double diff = currentPrice - untestedLows[i];
-      if(diff > 0.0 && diff < minLowDiff)
+      for(int j = i + 1; j < numLows; j++)
       {
-         minLowDiff = diff;
-         nearestLow = untestedLows[i];
+         if(rawLows[i] < rawLows[j])
+         {
+            double tempP = rawLows[i]; rawLows[i] = rawLows[j]; rawLows[j] = tempP;
+            int tempA = rawLowAges[i]; rawLowAges[i] = rawLowAges[j]; rawLowAges[j] = tempA;
+         }
       }
-      if(i < 3)
-      {
-         lowsDesc += StringFormat("[Price=%.2f, Age=%d bars, Dist=%.2f] ", untestedLows[i], lowAges[i], diff);
-      }
+   }
+   
+   // Copy top 3
+   int limitHigh = MathMin(3, numHighs);
+   ArrayResize(nearestHighs, limitHigh);
+   string highsDesc = "";
+   for(int i = 0; i < limitHigh; i++)
+   {
+      nearestHighs[i] = rawHighs[i];
+      highsDesc += StringFormat("[Price=%.2f, Age=%d bars, Dist=%.2f] ", rawHighs[i], rawHighAges[i], rawHighs[i] - currentPrice);
+   }
+   
+   int limitLow = MathMin(3, numLows);
+   ArrayResize(nearestLows, limitLow);
+   string lowsDesc = "";
+   for(int i = 0; i < limitLow; i++)
+   {
+      nearestLows[i] = rawLows[i];
+      lowsDesc += StringFormat("[Price=%.2f, Age=%d bars, Dist=%.2f] ", rawLows[i], rawLowAges[i], currentPrice - rawLows[i]);
    }
    
    if(highsDesc == "") highsDesc = "None";
@@ -1719,8 +1743,9 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    g_aiStrategy = "NONE";
     
    string magnetDesc = "";
-   double dummyHigh = 0.0, dummyLow = 0.0;
-   GetUntestedMagnets(magnetDesc, dummyHigh, dummyLow);
+   double nearestHighs[];
+   double nearestLows[];
+   GetUntestedMagnets(nearestHighs, nearestLows, magnetDesc);
 
    string prompt = StringFormat(
       "Gold (XAUUSD) setup analysis. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
