@@ -1873,11 +1873,28 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
 
    // --- Query the AI Conviction Engine ---
    string barsHistory = "";
-   for(int i = 5; i >= 1; i--)
+   for(int i = 10; i >= 1; i--)
    {
       barsHistory += StringFormat("[Bar %d: O=%.2f, H=%.2f, L=%.2f, C=%.2f, V=%I64d] ", 
          i, iOpen(_Symbol, _Period, i), iHigh(_Symbol, _Period, i), iLow(_Symbol, _Period, i), iClose(_Symbol, _Period, i), iVolume(_Symbol, _Period, i));
    }
+   
+   // Macro timeframe history for trend alignment
+   string macroHistory = "";
+   ENUM_TIMEFRAMES HTF = GetHigherTimeframe();
+   string htfName = (HTF == PERIOD_M15) ? "M15" : ((HTF == PERIOD_H1) ? "H1" : "H4");
+   for(int i = 5; i >= 1; i--)
+   {
+      macroHistory += StringFormat("[%s Bar %d: O=%.2f, H=%.2f, L=%.2f, C=%.2f] ", 
+         htfName, i, iOpen(_Symbol, HTF, i), iHigh(_Symbol, HTF, i), iLow(_Symbol, HTF, i), iClose(_Symbol, HTF, i));
+   }
+   
+   // Explicit trend description
+   string trendDesc = "Neutral/Rangebound (Price is oscillating)";
+   if(prevClose > currentEMA200 && prevClose > currentVWAP)
+      trendDesc = "Strong Bullish Trend (Price is above EMA200 and VWAP)";
+   else if(prevClose < currentEMA200 && prevClose < currentVWAP)
+      trendDesc = "Strong Bearish Trend (Price is below EMA200 and VWAP)";
    
    string tradeHistory = "";
    GetRecentTradesHistory(tradeHistory);
@@ -1890,12 +1907,14 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    GetUntestedMagnets(nearestHighs, nearestLows, magnetDesc);
 
    string prompt = StringFormat(
-      "Gold (XAUUSD) setup analysis. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
+      "Gold (XAUUSD) setup analysis. Current price=%.2f. Trend Direction: %s. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
       "Upcoming High-Impact News today: %s. "+
-      "Price History: %s. "+
+      "Price History (Active Timeframe): %s. "+
+      "Macro Price History (Higher Timeframe): %s. "+
       "Recent closed trades history: %s. "+
       "Untested Price Magnets (Liquidity Pools): %s. "+
-      "As a professional self-correcting quant trader, analyze the recent trade outcomes, evaluate current structure, news events, and structural price magnets, select the optimal strategy, and classify the hold time horizon (short quick trades vs long trend trades). "+
+      "As a professional self-correcting quant trader, analyze the macro trend, price history, and GNN magnets. "+
+      "Instructions: During strong trends (Price below/above EMA200 and VWAP with high ADX), you MUST trade in the direction of the trend (e.g. SELL if trend is bearish, BUY if bullish) and set take_profit_price EXACTLY at the nearest untested GNN Magnet level in that direction (e.g. nearest Aqua low for SELL, nearest Golden high for BUY) to capture the trend expansion. "+
       "Respond strictly with a JSON object containing: "+
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
@@ -1905,8 +1924,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "'stop_loss_price' (double target stop loss price level, or 0.0 to use default), "+
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words explaining decision and why you adjusted based on recent trades). "+
-      "Example output: { 'decision': 'BUY', 'conviction': 80, 'regime': 'BREAKOUT', 'strategy': 'VOLUME_BREAKOUT', 'horizon': 'LONG_TERM', 'stop_loss_price': 4102.50, 'take_profit_price': 4118.00, 'reason': 'Volume breakout above Donchian channel with volume surge' }.",
-      prevClose, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, tradeHistory, magnetDesc
+      "Example output: { 'decision': 'SELL', 'conviction': 90, 'regime': 'BREAKOUT', 'strategy': 'VOLUME_BREAKOUT', 'horizon': 'LONG_TERM', 'stop_loss_price': 4102.50, 'take_profit_price': 4080.00, 'reason': 'Strong bearish trend below VWAP targeting Aqua liquidity pool' }.",
+      prevClose, trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, tradeHistory, magnetDesc
    );
 
    bool aiActive = false;
