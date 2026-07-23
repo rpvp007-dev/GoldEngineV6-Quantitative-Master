@@ -48,6 +48,7 @@ input double   InpBalanceStep       = 500.00;  // Per how much account balance (
 
 input group "--- Sideways Hybrid Mode Settings ---"
 input bool     InpEnableHybridMode   = true;   // Enable Breakout/Reversion Switch
+input bool     InpUseLocalDonchianBreakout = true; // Use Donchian Breakout for local trending breakouts
 input double   InpMinADX             = 20.0;   // Custom Mode ONLY: ADX Threshold (Sideways < 20)
 
 input group "--- Session Momentum Hours ---"
@@ -73,6 +74,14 @@ input double   InpATROffsetMultiplier = 0.15;  // Custom Mode ONLY: ATR Multipli
 input group "--- Volatility-Adjusted Stop Loss ---"
 input bool     InpUseATRStopLoss     = true;   // Stop Loss dynamic based on ATR
 input double   InpATRMultiplier      = 1.5;    // Custom Mode ONLY: ATR Multiplier for Stop Loss distance
+
+input group "--- Strategy 1: Donchian Breakout Settings ---"
+input int      InpChannelLength   = 20;       // Donchian Channel Period
+input int      InpEMAPeriod       = 200;      // Trend Filter EMA Period
+input double   InpDonchianATRMult = 2.0;      // ATR Multiplier for Stop Loss
+input double   InpTargetMult      = 1.5;      // Take Profit Multiplier (1.5x SL)
+input double   InpMinSLPct        = 1.0;      // Default Min SL as % of price
+input double   InpMaxSLPct        = 3.0;      // Default Max SL as % of price
 
 input group "--- Profit Management Settings ---"
 input bool     InpEnablePartialClose = true;   // Close 50% lot at Break-Even Stage
@@ -118,6 +127,7 @@ int            g_emaHigherHandle;   // Higher timeframe EMA handle
 int            g_atrHandle;         // ATR handle
 int            g_rsiHandle;         // RSI handle
 int            g_adxHandle;         // ADX handle
+int            g_ema200Handle;      // EMA 200 Trend Filter handle
 
 // Spread smoothing buffers
 double         g_spreadBuffer[10];
@@ -1244,6 +1254,53 @@ void GetRecentTradesHistory(string &historyStr)
 }
 
 //+------------------------------------------------------------------+
+//| Donchian Channel High/Low and dynamic Stop Loss calculation     |
+//+------------------------------------------------------------------+
+double GetChannelHigh(int length)
+{
+   int highest_index = iHighest(_Symbol, _Period, MODE_HIGH, length, 1);
+   return iHigh(_Symbol, _Period, highest_index);
+}
+
+double GetChannelLow(int length)
+{
+   int lowest_index = iLowest(_Symbol, _Period, MODE_LOW, length, 1);
+   return iLow(_Symbol, _Period, lowest_index);
+}
+
+double GetStopLossDistance(string sym, double price, double atr)
+{
+   double lo = 0.0;
+   double hi = 0.0;
+
+   if(sym == "BTCUSD" || sym == "BTCUSDT") 
+   {
+      lo = 100.0;
+      hi = 800.0;
+   }
+   else if(sym == "ETHUSD" || sym == "ETHUSDT") 
+   {
+      lo = 5.0;
+      hi = 40.0;
+   }
+   else 
+   {
+      // Fallback percentage based bands
+      lo = price * InpMinSLPct / 100.0;
+      hi = price * InpMaxSLPct / 100.0;
+   }
+
+   // Clamp the base SL between lo and hi
+   double base_sl = InpDonchianATRMult * atr;
+   if(base_sl < lo) base_sl = lo;
+   if(base_sl > hi) base_sl = hi;
+
+   // Apply noise floor (1.5x ATR)
+   double noise_floor = 1.5 * atr;
+   return MathMax(base_sl, noise_floor);
+}
+
+//+------------------------------------------------------------------+
 //| Execute new order placement (Once per candle or on recovery)     |
 //+------------------------------------------------------------------+
 bool ExecuteNewOrderPlacement(datetime currentBarTime)
@@ -1309,6 +1366,14 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       isMomentumHour = true;
    }
 
+   double ema200Val[];
+   ArraySetAsSeries(ema200Val, true);
+   double currentEMA200 = 0.0;
+   if(CopyBuffer(g_ema200Handle, 0, 1, 1, ema200Val) > 0)
+   {
+      currentEMA200 = ema200Val[0];
+   }
+
    // --- Query the AI Conviction Engine ---
    string barsHistory = "";
    for(int i = 5; i >= 1; i--)
@@ -1323,7 +1388,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    g_aiStrategy = "NONE";
 
    string prompt = StringFormat(
-      "Gold (XAUUSD) setup analysis. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, Spread=%.2f. "+
+      "Gold (XAUUSD) setup analysis. Current price=%.2f. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, Spread=%.2f. "+
       "Price History: %s. "+
       "Recent closed trades history: %s. "+
       "As a professional self-correcting quant trader, analyze the recent trade outcomes, evaluate current structure, and select the optimal strategy. "+
@@ -1331,12 +1396,12 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
       "'regime' ('BREAKOUT' or 'REVERSION'), "+
-      "'strategy' ('BREAKOUT', 'MEAN_REVERSION', 'PULLBACK', 'STRADDLE', or 'SCALPING'), "+
+      "'strategy' ('BREAKOUT', 'MEAN_REVERSION', 'PULLBACK', 'STRADDLE', 'SCALPING', or 'DONCHIAN_BREAKOUT'), "+
       "'stop_loss_price' (double target stop loss price level, or 0.0 to use default), "+
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words explaining decision and why you adjusted based on recent trades). "+
-      "Example output: { 'decision': 'BUY', 'conviction': 80, 'regime': 'BREAKOUT', 'strategy': 'BREAKOUT', 'stop_loss_price': 4102.50, 'take_profit_price': 4118.00, 'reason': 'Adjusted to wider SL after recent breakout fakeout' }.",
-      prevClose, currentADX, currentATR, currentRSI, currentEMA, spread, barsHistory, tradeHistory
+      "Example output: { 'decision': 'BUY', 'conviction': 80, 'regime': 'BREAKOUT', 'strategy': 'DONCHIAN_BREAKOUT', 'stop_loss_price': 4102.50, 'take_profit_price': 4118.00, 'reason': 'Donchian breakout with EMA200 filter confirmation' }.",
+      prevClose, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, spread, barsHistory, tradeHistory
    );
 
    bool aiActive = false;
@@ -1540,11 +1605,55 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
           }
           if(g_dailySentiment != "BUY_ONLY")
           {
-             trade.SellStop(finalLotSize, sellStopPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AI Straddle SELL");
-          }
-          return true;
-       }
-    }
+              trade.SellStop(finalLotSize, sellStopPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AI Straddle SELL");
+           }
+           return true;
+        }
+        
+        if(g_aiStrategy == "DONCHIAN_BREAKOUT")
+        {
+           double ema200Val[];
+           ArraySetAsSeries(ema200Val, true);
+           if(CopyBuffer(g_ema200Handle, 0, 1, 1, ema200Val) > 0)
+           {
+              double curr_ema200 = ema200Val[0];
+              double ch_high = GetChannelHigh(InpChannelLength);
+              double ch_low = GetChannelLow(InpChannelLength);
+              
+              double donchianSL = (structuralSL > 0.0) ? (MathAbs(prevClose - structuralSL)) : GetStopLossDistance(_Symbol, prevClose, currentATR);
+              double donchianTP = (structuralTP > 0.0) ? (MathAbs(prevClose - structuralTP)) : (donchianSL * InpTargetMult);
+              
+              double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+              double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+              
+              if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+              {
+                 double buySL = currentAsk - donchianSL;
+                 double buyTP = currentAsk + donchianTP;
+                 
+                 // Risk Cap
+                 double maxRiskSL = NormalizeDouble(currentAsk - (2.0 * g_stopLossDist), _Digits);
+                 if(buySL < maxRiskSL) buySL = maxRiskSL;
+                 
+                 trade.Buy(finalLotSize, _Symbol, currentAsk, buySL, buyTP, "AI Donchian BUY");
+                 return true;
+              }
+              else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+              {
+                 double sellSL = currentBid + donchianSL;
+                 double sellTP = currentBid - donchianTP;
+                 
+                 // Risk Cap
+                 double maxRiskSL = NormalizeDouble(currentBid + (2.0 * g_stopLossDist), _Digits);
+                 if(sellSL > maxRiskSL) sellSL = maxRiskSL;
+                 
+                 trade.Sell(finalLotSize, _Symbol, currentBid, sellSL, sellTP, "AI Donchian SELL");
+                 return true;
+              }
+           }
+           return false;
+        }
+     }
 
     // --- Determine Entry Mode (Fallback / Standard AI regime switch) ---
     bool useReversionMode = false;
@@ -1609,7 +1718,55 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime)
    }
    else
    {
-      // --- TRENDING BREAKOUT MODE (Stop Orders) ---
+      // --- TRENDING BREAKOUT MODE ---
+      if(!aiActive && InpUseLocalDonchianBreakout)
+      {
+         double ema200Val[];
+         ArraySetAsSeries(ema200Val, true);
+         if(CopyBuffer(g_ema200Handle, 0, 1, 1, ema200Val) > 0)
+         {
+            double curr_ema200 = ema200Val[0];
+            double ch_high = GetChannelHigh(InpChannelLength);
+            double ch_low = GetChannelLow(InpChannelLength);
+            
+            bool triggerBuy  = (prevClose > ch_high) && (prevClose >= curr_ema200) && (g_dailySentiment != "SELL_ONLY");
+            bool triggerSell = (prevClose < ch_low)  && (prevClose < curr_ema200)  && (g_dailySentiment != "BUY_ONLY");
+            
+            if(triggerBuy)
+            {
+               double donchianSL = GetStopLossDistance(_Symbol, prevClose, currentATR);
+               double donchianTP = donchianSL * InpTargetMult;
+               
+               double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+               double buySL = currentAsk - donchianSL;
+               double buyTP = currentAsk + donchianTP;
+               
+               double maxRiskSL = NormalizeDouble(currentAsk - (2.0 * g_stopLossDist), _Digits);
+               if(buySL < maxRiskSL) buySL = maxRiskSL;
+               
+               trade.Buy(finalLotSize, _Symbol, currentAsk, buySL, buyTP, "Local Donchian BUY");
+               return true;
+            }
+            else if(triggerSell)
+            {
+               double donchianSL = GetStopLossDistance(_Symbol, prevClose, currentATR);
+               double donchianTP = donchianSL * InpTargetMult;
+               
+               double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+               double sellSL = currentBid + donchianSL;
+               double sellTP = currentBid - donchianTP;
+               
+               double maxRiskSL = NormalizeDouble(currentBid + (2.0 * g_stopLossDist), _Digits);
+               if(sellSL > maxRiskSL) sellSL = maxRiskSL;
+               
+               trade.Sell(finalLotSize, _Symbol, currentBid, sellSL, sellTP, "Local Donchian SELL");
+               return true;
+            }
+         }
+         return false;
+      }
+
+      // --- Fallback: Standard Trending Breakout Mode (Stop Orders) ---
       if(InpUseATRFilter && currentATR < g_minATR) return false;
       
       if(InpUseVolumeFilter)
@@ -1760,9 +1917,11 @@ int OnInit()
    g_atrHandle = iATR(_Symbol, _Period, 14);
    g_rsiHandle = iRSI(_Symbol, _Period, 14, PRICE_CLOSE);
    g_adxHandle = iADX(_Symbol, _Period, 14);
+   g_ema200Handle = iMA(_Symbol, _Period, InpEMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
    
    if(g_emaHandle == INVALID_HANDLE || g_emaHigherHandle == INVALID_HANDLE || 
-      g_atrHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE || g_adxHandle == INVALID_HANDLE)
+      g_atrHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE || g_adxHandle == INVALID_HANDLE ||
+      g_ema200Handle == INVALID_HANDLE)
    {
       Print("[V10 INIT ERROR] Failed to initialize indicators.");
       return(INIT_FAILED);
@@ -1798,6 +1957,7 @@ void OnDeinit(const int reason)
    IndicatorRelease(g_atrHandle);
    IndicatorRelease(g_rsiHandle);
    IndicatorRelease(g_adxHandle);
+   IndicatorRelease(g_ema200Handle);
    
    // Delete UI elements
    ObjectDelete(0, "DbPanelBg");
