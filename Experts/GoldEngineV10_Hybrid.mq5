@@ -141,6 +141,22 @@ input bool     InpUseAIEngines       = true;    // Enable AI Brain Integration
 input ENUM_AI_ENGINE InpAIEngineSelection = AI_GROQ; // AI Engine Selection
 input int      InpMinConviction      = 50;      // Minimum AI Conviction to trade (0-100)
 
+enum ENUM_DB_POSITION
+{
+   DB_POS_TOP_LEFT,      // Top Left
+   DB_POS_TOP_RIGHT,     // Top Right
+   DB_POS_BOTTOM_LEFT,   // Bottom Left
+   DB_POS_BOTTOM_RIGHT,  // Bottom Right
+   DB_POS_CENTER,        // Center
+   DB_POS_FREE_MOVE      // Free Move (Drag panel to move)
+};
+
+input group "--- Dashboard UI Settings ---"
+input bool             InpShowDashboard      = true;               // Show Dashboard Panel
+input ENUM_DB_POSITION InpDashboardPosition  = DB_POS_TOP_LEFT;     // Dashboard Position Mode
+input int              InpDashboardX         = 20;                 // Custom X Offset (Or corner offset)
+input int              InpDashboardY         = 60;                 // Custom Y Offset (Or corner offset)
+
 input group "--- Core Risk Settings ---"
 input double   InpLotSize          = 0.10;     // Fixed Lot Size (If Compounding is disabled)
 input double   InpTargetRiskUSD    = 25.00;    // Target dollar risk per trade ($)
@@ -263,6 +279,8 @@ int            g_ema200M15Handle = INVALID_HANDLE;
 int            g_ema200H1Handle = INVALID_HANDLE;
 
 // Mid-Candle AI Call Cooldowns
+int            g_dbX = -1;
+int            g_dbY = -1;
 bool           g_midCandleQueried = false;
 datetime       g_lastAICallTime = 0;
 bool           g_enableBE;
@@ -519,41 +537,105 @@ void UpdateButtonState()
 //+------------------------------------------------------------------+
 void CreateInterface()
 {
-   // Redesigned: 550px wide, 360px high to fit spaced-out dashboard rows
+   if(!InpShowDashboard)
+   {
+      ObjectDelete(0, "DbPanelBg");
+      ObjectDelete(0, "DbTitle");
+      ObjectDelete(0, "DbTimeframe");
+      ObjectDelete(0, "DbLotSize");
+      ObjectDelete(0, "DbADX");
+      ObjectDelete(0, "DbATR");
+      ObjectDelete(0, "DbMode");
+      ObjectDelete(0, "DbSL");
+      ObjectDelete(0, "DbBias");
+      ObjectDelete(0, "DbDecision");
+      ObjectDelete(0, "DbConviction");
+      ObjectDelete(0, "DbReason");
+      ObjectDelete(0, "BtnEAToggle");
+      ChartRedraw();
+      return;
+   }
+
    int panelWidth  = 550;
    int panelHeight = 360;
    int margin      = 25;
-   int textX       = 20 + margin;
-   int fontSize    = 8; 
+   
+   int chartWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int chartHeight = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+   
+   int baseX = InpDashboardX;
+   int baseY = InpDashboardY;
+   
+   if(g_dbX >= 0 || g_dbY >= 0)
+   {
+      baseX = g_dbX;
+      baseY = g_dbY;
+   }
+   else
+   {
+      switch(InpDashboardPosition)
+      {
+         case DB_POS_TOP_LEFT:
+            baseX = InpDashboardX;
+            baseY = InpDashboardY;
+            break;
+         case DB_POS_TOP_RIGHT:
+            baseX = chartWidth - panelWidth - InpDashboardX;
+            baseY = InpDashboardY;
+            break;
+         case DB_POS_BOTTOM_LEFT:
+            baseX = InpDashboardX;
+            baseY = chartHeight - panelHeight - InpDashboardY - 40;
+            break;
+         case DB_POS_BOTTOM_RIGHT:
+            baseX = chartWidth - panelWidth - InpDashboardX;
+            baseY = chartHeight - panelHeight - InpDashboardY - 40;
+            break;
+         case DB_POS_CENTER:
+            baseX = (chartWidth - panelWidth) / 2;
+            baseY = (chartHeight - panelHeight) / 2;
+            break;
+         case DB_POS_FREE_MOVE:
+            baseX = InpDashboardX;
+            baseY = InpDashboardY;
+            break;
+      }
+      g_dbX = baseX;
+      g_dbY = baseY;
+   }
+   
+   int textX = baseX + margin;
+   int fontSize = 8;
    
    // 1. Create Background Shield
-   CreatePanelBg("DbPanelBg", 20, 60, panelWidth, panelHeight, C'20,20,20', C'70,70,70');
+   CreatePanelBg("DbPanelBg", baseX, baseY, panelWidth, panelHeight, C'20,20,20', C'70,70,70');
+   ObjectSetInteger(0, "DbPanelBg", OBJPROP_SELECTABLE, true);
    
    // 2. Create Header
-   CreateLabel("DbTitle", textX, 75, "GOLD ENGINE V10 - HYBRID PRO", 10, C'255,179,0', "Segoe UI Semibold");
+   CreateLabel("DbTitle", textX, baseY + 15, "GOLD ENGINE V10 - HYBRID PRO", 10, C'255,179,0', "Segoe UI Semibold");
    
-   // 3. Create Rows (Clean spaced-out 22px line height)
-   CreateLabel("DbTimeframe", textX, 100, "Chart Timeframe : ", fontSize, clrWhite);
-   CreateLabel("DbLotSize",   textX, 122, "Dynamic Lot Size: ", fontSize, clrWhite);
-   CreateLabel("DbADX",       textX, 144, "Current ADX     : ", fontSize, clrWhite);
-   CreateLabel("DbATR",       textX, 166, "Current ATR     : ", fontSize, clrWhite);
-   CreateLabel("DbMode",      textX, 188, "Active Mode     : ", fontSize, clrWhite);
-   CreateLabel("DbSL",        textX, 210, "Stop Loss (ATR) : ", fontSize, clrWhite);
+   // 3. Create Rows (Relative to baseY)
+   CreateLabel("DbTimeframe", textX, baseY + 40, "Chart Timeframe : ", fontSize, clrWhite);
+   CreateLabel("DbLotSize",   textX, baseY + 62, "Dynamic Lot Size: ", fontSize, clrWhite);
+   CreateLabel("DbADX",       textX, baseY + 84, "Current ADX     : ", fontSize, clrWhite);
+   CreateLabel("DbATR",       textX, baseY + 106, "Current ATR     : ", fontSize, clrWhite);
+   CreateLabel("DbMode",      textX, baseY + 128, "Active Mode     : ", fontSize, clrWhite);
+   CreateLabel("DbSL",        textX, baseY + 150, "Stop Loss (ATR) : ", fontSize, clrWhite);
    
    // AI Dashboard Rows
-   CreateLabel("DbBias",      textX, 232, "AI Daily Bias   : ", fontSize, clrWhite);
-   CreateLabel("DbDecision",  textX, 254, "AI Decision     : ", fontSize, clrWhite);
-   CreateLabel("DbConviction",textX, 276, "AI Conviction   : ", fontSize, clrWhite);
-   CreateLabel("DbReason",    textX, 298, "AI Reason       : ", fontSize, clrWhite);
+   CreateLabel("DbBias",      textX, baseY + 172, "AI Daily Bias   : ", fontSize, clrWhite);
+   CreateLabel("DbDecision",  textX, baseY + 194, "AI Decision     : ", fontSize, clrWhite);
+   CreateLabel("DbConviction",textX, baseY + 216, "AI Conviction   : ", fontSize, clrWhite);
+   CreateLabel("DbReason",    textX, baseY + 238, "AI Reason       : ", fontSize, clrWhite);
    
-   // 4. Create Button (Nested at the bottom of the panel with margins aligned)
+   // 4. Create Button
    string btnName = "BtnEAToggle";
    if(ObjectFind(0, btnName) < 0)
    {
       ObjectCreate(0, btnName, OBJ_BUTTON, 0, 0, 0);
    }
    ObjectSetInteger(0, btnName, OBJPROP_XDISTANCE, textX);
-   ObjectSetInteger(0, btnName, OBJPROP_YDISTANCE, 365); // Moved down to fit spaced-out rows
+   ObjectSetInteger(0, btnName, OBJPROP_YDISTANCE, baseY + 305);
    ObjectSetInteger(0, btnName, OBJPROP_XSIZE, panelWidth - (margin * 2));
    ObjectSetInteger(0, btnName, OBJPROP_YSIZE, 32);
    ObjectSetInteger(0, btnName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -572,6 +654,7 @@ void CreateInterface()
 //+------------------------------------------------------------------+
 void DrawChartStatus(double currentADX, double currentATR, bool reversionModeActive)
 {
+   if(!InpShowDashboard) return;
    if(ObjectFind(0, "DbPanelBg") < 0)
    {
       CreateInterface();
@@ -3130,6 +3213,16 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
+   if(id == CHARTEVENT_OBJECT_DRAG)
+   {
+      if(sparam == "DbPanelBg")
+      {
+         g_dbX = (int)ObjectGetInteger(0, "DbPanelBg", OBJPROP_XDISTANCE);
+         g_dbY = (int)ObjectGetInteger(0, "DbPanelBg", OBJPROP_YDISTANCE);
+         CreateInterface();
+         ChartRedraw();
+      }
+   }
    if(id == CHARTEVENT_OBJECT_CLICK)
    {
       if(sparam == "BtnEAToggle")
