@@ -187,14 +187,14 @@ input int      InpNYEndHour          = 16;     // NY End Hour (Server time)
 input int      InpNYEndMin           = 30;     // NY End Minute (Server time)
 
 input group "--- Precision & Volume Filters (BREAKOUT ONLY) ---"
-input bool     InpUseVolumeFilter    = true;   // Tick Volume Filter (confirm breakout volume)
-input bool     InpUseMTFTrendFilter  = true;   // Dual-Timeframe Trend Alignment (Macro direction)
-input bool     InpUseEMAFilter       = true;   // Filter entries by 50 EMA Trend (Local direction)
-input bool     InpUseRSIFilter       = true;   // Filter out Trend Exhaustion (RSI 70/30)
-input bool     InpUseATRFilter       = true;   // Block trading if ATR Volatility is low
+input bool     InpUseVolumeFilter    = false;   // Tick Volume Filter (confirm breakout volume)
+input bool     InpUseMTFTrendFilter  = false;   // Dual-Timeframe Trend Alignment (Macro direction)
+input bool     InpUseEMAFilter       = false;   // Filter entries by 50 EMA Trend (Local direction)
+input bool     InpUseRSIFilter       = false;   // Filter out Trend Exhaustion (RSI 70/30)
+input bool     InpUseATRFilter       = false;   // Block trading if ATR Volatility is low
 
 input group "--- Volatility-Adjusted Entry Offset ---"
-input bool     InpUseATROffset       = true;   // Dynamic Entry Offset based on ATR
+input bool     InpUseATROffset       = false;   // Dynamic Entry Offset based on ATR
 input double   InpATROffsetMultiplier = 0.15;  // Custom Mode ONLY: ATR Multiplier for Entry Offset
 
 input group "--- Volatility-Adjusted Stop Loss ---"
@@ -347,6 +347,10 @@ ENUM_TIMEFRAMES GetHigherTimeframe()
 
 bool CalculateReversionMode(double adxVal, bool isMomHour, bool isVolSpike, bool aiAct, string rawReg)
 {
+   if(aiAct)
+   {
+      return (rawReg == "REVERSION");
+   }
    if(!InpEnableHybridMode) return false;
    
    // Global Trend Guard: if ADX shows a very strong trend, NEVER reversion trade range limits
@@ -2355,7 +2359,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
    bool useReversionMode = CalculateReversionMode(currentADX, isMomentumHour, isVolatilitySpike, aiActive, g_aiRegime);
 
    // Trend Adaptation: if ADX trend guard blocks reversion, convert range strategy to breakout
-   if(!useReversionMode && (g_aiStrategy == "MEAN_REVERSION" || g_aiStrategy == "SCALPING" || g_aiStrategy == "NONE" || g_aiStrategy == ""))
+   if(!aiActive && !useReversionMode && (g_aiStrategy == "MEAN_REVERSION" || g_aiStrategy == "SCALPING" || g_aiStrategy == "NONE" || g_aiStrategy == ""))
    {
       g_aiStrategy = "VOLUME_BREAKOUT";
       Print("[Trend Adaptation] Converted AI range strategy to VOLUME_BREAKOUT due to high ADX Trend Guard.");
