@@ -164,6 +164,7 @@ input group "--- Core Risk Settings ---"
 input double   InpLotSize          = 0.10;     // Fixed Lot Size (If Compounding is disabled)
 input double   InpTargetRiskUSD    = 25.00;    // Target dollar risk per trade ($)
 input ulong    InpMagicNumber      = 123456;   // Magic Number
+input int      InpMaxConcurrentTrades = 2;       // Max Concurrent Trades (Allows dip buying)
 
 input group "--- Compounding Settings ---"
 input bool     InpEnableCompounding = true;    // Enable Lot Compounding (scales target risk)
@@ -3717,7 +3718,7 @@ void ManageSidewaysEscape(bool reversionModeActive)
 void CheckMidCandleTriggers(datetime currentBarTime)
 {
    if(!InpUseAIEngines || !g_eaRunning) return;
-   if(CountActiveTrades() > 0) return;
+   if(CountActiveTrades() >= InpMaxConcurrentTrades) return;
    
    if(g_midCandleQueried || (TimeCurrent() - g_lastAICallTime < 30)) return;
    
@@ -4046,7 +4047,7 @@ void OnTick()
    // Place orders if not yet successfully processed for this candle and no open orders exist
    if(g_eaRunning && g_lastOrderPlacedBarTime != currentBarTime)
    {
-      if(CountActiveTrades() == 0)
+      if(CountActiveTrades() < InpMaxConcurrentTrades)
       {
          ExecuteNewOrderPlacement(currentBarTime);
       }
