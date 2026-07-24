@@ -128,7 +128,7 @@ enum ENUM_AI_ENGINE {
    AI_GROQ,            // Groq Llama-3.1 (Recommended: Fast & High Quotas)
    AI_GEMINI,          // Gemini Flash
    AI_OPENROUTER,      // OpenRouter
-   AI_BOTH_FAILOVER    // Gemini first, failover to Groq
+   AI_BOTH_FAILOVER    // OpenRouter first, failover to Groq
 };
 
 //--- Input Parameters
@@ -1396,11 +1396,11 @@ bool CallAI(string prompt, string &responseText)
       return QueryOpenRouterDirect(prompt, responseText);
    }
    
-   // --- Option 4: Gemini first, failover to Groq ---
+   // --- Option 4: OpenRouter first, failover to Groq ---
    if(InpAIEngineSelection == AI_BOTH_FAILOVER)
    {
-      if(QueryGeminiDirect(prompt, responseText)) return true;
-      Print("[AI Failover] Gemini API unavailable. Switching to Groq Llama-3.1...");
+      if(QueryOpenRouterDirect(prompt, responseText)) return true;
+      Print("[AI Failover] OpenRouter API unavailable. Switching to Groq Llama-3.1...");
       return QueryGroqDirect(prompt, responseText);
    }
    
@@ -3154,15 +3154,15 @@ void TestAIEngines()
        success = QueryOpenRouterDirect("Respond strictly with status OK in json format. Example: {\"status\":\"OK\"}", resp);
     }
     else if(InpAIEngineSelection == AI_BOTH_FAILOVER)
-   {
-      name = "Gemini & Groq (Failover)";
-      string resp = "";
-      bool gemSuccess = QueryGeminiDirect("Respond strictly with status OK in json format. Example: {\"status\":\"OK\"}", resp);
-      bool groqSuccess = QueryGroqDirect("Respond strictly with status OK in json format. Example: {\"status\":\"OK\"}", resp);
-      success = gemSuccess || groqSuccess;
-      if(gemSuccess) g_aiReason = "Gemini API OK";
-      else if(groqSuccess) g_aiReason = "Groq API OK (Gemini Offline)";
-   }
+    {
+       name = "OpenRouter & Groq (Failover)";
+       string resp = "";
+       bool openrouterSuccess = QueryOpenRouterDirect("Respond strictly with status OK in json format. Example: {\"status\":\"OK\"}", resp);
+       bool groqSuccess = QueryGroqDirect("Respond strictly with status OK in json format. Example: {\"status\":\"OK\"}", resp);
+       success = openrouterSuccess || groqSuccess;
+       if(openrouterSuccess) g_aiReason = "OpenRouter API OK";
+       else if(groqSuccess) g_aiReason = "Groq API OK (OpenRouter Offline)";
+    }
    
    if(success)
    {
