@@ -1701,8 +1701,8 @@ void ManageActivePositions()
              double aquaFloor = (ArraySize(nearestLows) > 0) ? nearestLows[0] : 0.0;
              
              bool isRecoveryTrade = (posComment == "RECOVERY_ENTRY" || posComment == "HEDGE_FREEZE");
-            bool isBreakoutTrade = (StringFind(posComment, "Breakout") >= 0 || StringFind(posComment, "Donchian") >= 0 || StringFind(posComment, "Straddle") >= 0);
-            if(!isRecoveryTrade && !isBreakoutTrade)
+            bool isScalpTrade = (StringFind(posComment, "Scalp") >= 0);
+            if(isScalpTrade)
             {
                if(type == POSITION_TYPE_BUY && goldCeiling > 0.0 && currentBid >= goldCeiling)
                {
@@ -1717,6 +1717,7 @@ void ManageActivePositions()
                   continue;
                }
             }
+
             
             if(g_enableTimeDecay && !isSwingPosition)
             {
