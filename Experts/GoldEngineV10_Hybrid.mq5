@@ -843,21 +843,29 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
        }
     }
     
-    // Clean up excess broken lines to prevent chart memory overload
-    int totalObjects = ObjectsTotal(0, 0, OBJ_HLINE);
-    int brokenCount = 0;
-    for(int k = totalObjects - 1; k >= 0; k--)
-    {
-       string objName = ObjectName(0, k, 0, OBJ_HLINE);
-       if(StringFind(objName, "BrokenHigh_") == 0 || StringFind(objName, "BrokenLow_") == 0)
-       {
-          brokenCount++;
-          if(brokenCount > 20)
-          {
-             ObjectDelete(0, objName);
-          }
-       }
-    }
+    // Clean up broken lines older than 30 minutes
+     int totalObjects = ObjectsTotal(0, 0, OBJ_HLINE);
+     for(int k = totalObjects - 1; k >= 0; k--)
+     {
+        string objName = ObjectName(0, k, 0, OBJ_HLINE);
+        if(StringFind(objName, "BrokenHigh_") == 0 || StringFind(objName, "BrokenLow_") == 0)
+        {
+           int firstUnderscore = StringFind(objName, "_");
+           if(firstUnderscore >= 0)
+           {
+              int secondUnderscore = StringFind(objName, "_", firstUnderscore + 1);
+              if(secondUnderscore > firstUnderscore)
+              {
+                 string timeStr = StringSubstr(objName, firstUnderscore + 1, secondUnderscore - firstUnderscore - 1);
+                 datetime brokenTime = (datetime)StringToInteger(timeStr);
+                 if(TimeCurrent() - brokenTime > 1800) // 30 minutes
+                 {
+                    ObjectDelete(0, objName);
+                 }
+              }
+           }
+        }
+     }
    
    // Draw High Magnets (closest to furthest)
    color goldColors[3] = { C'255,215,0', C'218,165,32', C'184,134,11' }; // Gold, Goldenrod, Dark Goldenrod
