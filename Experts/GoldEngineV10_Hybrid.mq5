@@ -1543,6 +1543,74 @@ void ManageActivePositions()
              double nearestLows[];
              string dummy = "";
              GetUntestedMagnets(nearestHighs, nearestLows, dummy);
+             
+            // --- Live Stop Loss Safety Adjuster (Failsafe Guard Rail) ---
+            if(type == POSITION_TYPE_BUY)
+            {
+               double nearestSupport = 0.0;
+               for(int j = 0; j < ArraySize(nearestLows); j++)
+               {
+                  if(nearestLows[j] > 0.0 && nearestLows[j] < currentBid)
+                  {
+                     if(j + 1 < ArraySize(nearestLows) && nearestLows[j+1] > 0.0 && (nearestLows[j] - nearestLows[j+1] <= 8.0))
+                     {
+                        nearestSupport = nearestLows[j+1];
+                     }
+                     else
+                     {
+                        nearestSupport = nearestLows[j];
+                     }
+                     break;
+                  }
+               }
+               
+               if(nearestSupport > 0.0)
+               {
+                  double safeSL = NormalizeDouble(nearestSupport - 4.0, _Digits);
+                  if(currentSL == 0.0 || (currentSL > safeSL && currentBid - safeSL >= stopsLevel))
+                  {
+                     PrintFormat("[SL Safety Adjuster] Modifying BUY trade #%I64u SL from %.2f to safe level %.2f (4.0 USD below support %.2f) to protect it from liquidity sweeps.", 
+                        ticket, currentSL, safeSL, nearestSupport);
+                     if(trade.PositionModify(ticket, safeSL, currentTP))
+                     {
+                        currentSL = safeSL;
+                      }
+                  }
+               }
+            }
+            else if(type == POSITION_TYPE_SELL)
+            {
+               double nearestResistance = 0.0;
+               for(int j = 0; j < ArraySize(nearestHighs); j++)
+               {
+                  if(nearestHighs[j] > 0.0 && nearestHighs[j] > currentAsk)
+                  {
+                     if(j + 1 < ArraySize(nearestHighs) && nearestHighs[j+1] > 0.0 && (nearestHighs[j+1] - nearestHighs[j] <= 8.0))
+                     {
+                        nearestResistance = nearestHighs[j+1];
+                     }
+                     else
+                     {
+                        nearestResistance = nearestHighs[j];
+                     }
+                     break;
+                  }
+               }
+               
+               if(nearestResistance > 0.0)
+               {
+                  double safeSL = NormalizeDouble(nearestResistance + 4.0, _Digits);
+                  if(currentSL == 0.0 || (currentSL < safeSL && safeSL - currentAsk >= stopsLevel))
+                  {
+                     PrintFormat("[SL Safety Adjuster] Modifying SELL trade #%I64u SL from %.2f to safe level %.2f (4.0 USD above resistance %.2f) to protect it from liquidity sweeps.", 
+                        ticket, currentSL, safeSL, nearestResistance);
+                     if(trade.PositionModify(ticket, safeSL, currentTP))
+                     {
+                        currentSL = safeSL;
+                     }
+                  }
+               }
+            }
              double goldCeiling = (ArraySize(nearestHighs) > 0) ? nearestHighs[0] : 0.0;
              double aquaFloor = (ArraySize(nearestLows) > 0) ? nearestLows[0] : 0.0;
              
