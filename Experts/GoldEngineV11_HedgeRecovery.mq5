@@ -3794,6 +3794,7 @@ void CheckMidCandleTriggers(datetime currentBarTime)
 //+------------------------------------------------------------------+
 bool CheckTrendConfluence(string decision)
 {
+   if(!InpUseMTFTrendFilter) return true;
    double ema200Val[];
    if(CopyBuffer(g_ema200Handle, 0, 1, 1, ema200Val) <= 0) return false;
    double prevCloseVal = iClose(_Symbol, _Period, 1);
