@@ -287,6 +287,7 @@ double         g_takeProfitDist;
 
 int            g_ema200M15Handle = INVALID_HANDLE;
 int            g_ema200H1Handle = INVALID_HANDLE;
+int            g_ema200H4Handle = INVALID_HANDLE;
 
 // Mid-Candle AI Call Cooldowns
 int            g_dbX = -1;
@@ -2416,9 +2417,52 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
    
    string spreadSignal = (spread <= 0.40) ? "NORMAL (Low Spread)" : "WIDENED (High Spread Risk)";
 
+   // --- Advanced Data Enrichment: Daily Range, MTF Confluence, and Countdown ---
+   MqlRates dailyRates[];
+   ArraySetAsSeries(dailyRates, true);
+   double dailyHigh = 0.0;
+   double dailyLow = 0.0;
+   if(CopyRates(_Symbol, PERIOD_D1, 0, 1, dailyRates) > 0)
+   {
+      dailyHigh = dailyRates[0].high;
+      dailyLow = dailyRates[0].low;
+   }
+   double dailyRange = dailyHigh - dailyLow;
+   double dailyPct = (dailyRange > 0.0) ? (((prevClose - dailyLow) / dailyRange) * 100.0) : 0.0;
+   string dailyRangeDesc = StringFormat("Daily High: %.2f, Daily Low: %.2f. Price is at %.1f%% of today's total range.", dailyHigh, dailyLow, dailyPct);
+
+   double ema200H1Val[];
+   double ema200H4Val[];
+   ArraySetAsSeries(ema200H1Val, true);
+   ArraySetAsSeries(ema200H4Val, true);
+   double h1Ema = 0.0;
+   double h4Ema = 0.0;
+   if(CopyBuffer(g_ema200H1Handle, 0, 0, 1, ema200H1Val) > 0) h1Ema = ema200H1Val[0];
+   if(CopyBuffer(g_ema200H4Handle, 0, 0, 1, ema200H4Val) > 0) h4Ema = ema200H4Val[0];
+   string h1Trend = (h1Ema > 0.0) ? ((prevClose > h1Ema) ? "BULLISH" : "BEARISH") : "UNKNOWN";
+   string h4Trend = (h4Ema > 0.0) ? ((prevClose > h4Ema) ? "BULLISH" : "BEARISH") : "UNKNOWN";
+   string mtfConfluenceDesc = StringFormat("Confluence: H1 EMA200 is %s, H4 EMA200 is %s.", h1Trend, h4Trend);
+
+   datetime curTime = TimeCurrent();
+   MqlDateTime sdt;
+   TimeToStruct(curTime, sdt);
+   int curHour = sdt.hour;
+   int curMin = sdt.min;
+   int curMinsFromMidnight = curHour * 60 + curMin;
+   int londonOpenMins = 11 * 60; // 11:00 Broker Time
+   int nyOpenMins = 16 * 60 + 30; // 16:30 Broker Time
+   int minsToLondon = (curMinsFromMidnight < londonOpenMins) ? (londonOpenMins - curMinsFromMidnight) : -1;
+   int minsToNY = (curMinsFromMidnight < nyOpenMins) ? (nyOpenMins - curMinsFromMidnight) : -1;
+   string sessionCountdownDesc = "";
+   if(minsToLondon > 0) sessionCountdownDesc += StringFormat("London Open in %d mins. ", minsToLondon);
+   else sessionCountdownDesc += "London is open. ";
+   if(minsToNY > 0) sessionCountdownDesc += StringFormat("NY Open in %d mins. ", minsToNY);
+   else sessionCountdownDesc += "NY is open. ";
+
    string prompt = StringFormat(
       "Gold (XAUUSD) setup analysis. Current price=%.2f. Active Session: %s. Account Capital: Balance=%.2f, Equity=%.2f, Free Margin=%.2f, Margin Level=%.1f%%. "+
       "GNN Line Distances: %s. Technical Signals: Macro Trend is %s, Intraday VWAP is %s, RSI Status: %s, Spread Status: %s. "+
+      "Daily Range Analysis: %s. Multi-Timeframe Trend %s. Volatility opens: %s. "+
       "Trend Direction: %s. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
       "Upcoming High-Impact News today: %s. "+
       "Price History (Active Timeframe): %s. "+
@@ -2437,7 +2481,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       "'stop_loss_price' (double target stop loss price level, or 0.0 to use default), "+
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words explaining decision and why you adjusted based on recent trades).",
-      prevClose, activeSession, balance, equity, freeMargin, marginLevel, gnnDistanceDesc, maSignal, vwapSignal, rsiSignal, spreadSignal,
+      prevClose, activeSession, balance, equity, freeMargin, marginLevel, gnnDistanceDesc, maSignal, vwapSignal, rsiSignal, spreadSignal, dailyRangeDesc, mtfConfluenceDesc, sessionCountdownDesc,
       trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, candlePatterns, tradeHistory, magnetDesc, ictDesc
    );
 
@@ -3402,6 +3446,7 @@ int OnInit()
    g_ema9Handle   = iMA(_Symbol, _Period, InpEMA9Length, 0, MODE_EMA, PRICE_CLOSE);
    g_ema200M15Handle = iMA(_Symbol, PERIOD_M15, 200, 0, MODE_EMA, PRICE_CLOSE);
    g_ema200H1Handle = iMA(_Symbol, PERIOD_H1, 200, 0, MODE_EMA, PRICE_CLOSE);
+   g_ema200H4Handle = iMA(_Symbol, PERIOD_H4, 200, 0, MODE_EMA, PRICE_CLOSE);
    
    if(g_emaHandle == INVALID_HANDLE || g_emaHigherHandle == INVALID_HANDLE || 
       g_atrHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE || g_adxHandle == INVALID_HANDLE ||
@@ -3448,6 +3493,7 @@ void OnDeinit(const int reason)
    IndicatorRelease(g_adxHandle);
    IndicatorRelease(g_ema200Handle);
    IndicatorRelease(g_ema9Handle);
+   IndicatorRelease(g_ema200H4Handle);
    
    // Delete UI elements
    ObjectDelete(0, "DbPanelBg");
