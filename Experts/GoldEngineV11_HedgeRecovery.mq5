@@ -2392,8 +2392,33 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
    double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
    double marginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
 
+   double nHighs[];
+   double nLows[];
+   string mDesc = "";
+   GetUntestedMagnets(nHighs, nLows, mDesc);
+   double goldCeiling = (ArraySize(nHighs) > 0) ? nHighs[0] : 0.0;
+   double aquaFloor = (ArraySize(nLows) > 0) ? nLows[0] : 0.0;
+   
+   double distanceToCeiling = (goldCeiling > 0.0) ? (goldCeiling - prevClose) : -1.0;
+   double distanceToFloor = (aquaFloor > 0.0) ? (prevClose - aquaFloor) : -1.0;
+   
+   string gnnDistanceDesc = "";
+   if(distanceToCeiling >= 0.0) gnnDistanceDesc += StringFormat("Price is %.2f USD below Golden Ceiling (%.2f). ", distanceToCeiling, goldCeiling);
+   else gnnDistanceDesc += "No active Golden Ceiling. ";
+   if(distanceToFloor >= 0.0) gnnDistanceDesc += StringFormat("Price is %.2f USD above Aqua Floor (%.2f). ", distanceToFloor, aquaFloor);
+   else gnnDistanceDesc += "No active Aqua Floor. ";
+   
+   string maSignal = (prevClose > currentEMA200) ? "ABOVE EMA200 (Macro Bullish)" : "BELOW EMA200 (Macro Bearish)";
+   string vwapSignal = (prevClose > currentVWAP) ? "ABOVE VWAP (Intraday Bullish)" : "BELOW VWAP (Intraday Bearish)";
+   string rsiSignal = "NEUTRAL";
+   if(currentRSI < 30.0) rsiSignal = "OVERSOLD (Reversal Target)";
+   else if(currentRSI > 70.0) rsiSignal = "OVERBOUGHT (Reversal Target)";
+   
+   string spreadSignal = (spread <= 0.40) ? "NORMAL (Low Spread)" : "WIDENED (High Spread Risk)";
+
    string prompt = StringFormat(
       "Gold (XAUUSD) setup analysis. Current price=%.2f. Active Session: %s. Account Capital: Balance=%.2f, Equity=%.2f, Free Margin=%.2f, Margin Level=%.1f%%. "+
+      "GNN Line Distances: %s. Technical Signals: Macro Trend is %s, Intraday VWAP is %s, RSI Status: %s, Spread Status: %s. "+
       "Trend Direction: %s. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
       "Upcoming High-Impact News today: %s. "+
       "Price History (Active Timeframe): %s. "+
@@ -2412,7 +2437,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       "'stop_loss_price' (double target stop loss price level, or 0.0 to use default), "+
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words explaining decision and why you adjusted based on recent trades).",
-      prevClose, activeSession, balance, equity, freeMargin, marginLevel,
+      prevClose, activeSession, balance, equity, freeMargin, marginLevel, gnnDistanceDesc, maSignal, vwapSignal, rsiSignal, spreadSignal,
       trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, candlePatterns, tradeHistory, magnetDesc, ictDesc
    );
 
