@@ -139,7 +139,7 @@ input group "--- AI Engine Settings ---"
 input string   InpGeminiAPIKey       = ""; // Gemini API Key (aistudio.google.com)
 input string   InpGroqAPIKey         = ""; // Groq API Key (console.groq.com)
 input string   InpOpenRouterAPIKey   = ""; // OpenRouter API Key (openrouter.ai)
-input string   InpOpenRouterModel    = "meta-llama/llama-3.1-8b-instruct"; // OpenRouter Model Name
+input string   InpOpenRouterModel    = "google/gemma-4-31b-it"; // OpenRouter Model Name
 input bool     InpUseAIEngines       = true;    // Enable AI Brain Integration
 input ENUM_AI_ENGINE InpAIEngineSelection = AI_GROQ; // AI Engine Selection
 input int      InpMinConviction      = 1;      // Minimum AI Conviction to trade (0-100)
