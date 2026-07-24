@@ -816,8 +816,9 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
              ObjectSetInteger(0, brokenName, OBJPROP_STYLE, STYLE_DOT);
              ObjectSetInteger(0, brokenName, OBJPROP_COLOR, clrDimGray);
              ObjectSetInteger(0, brokenName, OBJPROP_SELECTABLE, false);
+             
+             ObjectDelete(0, oldHighName);
           }
-          ObjectDelete(0, oldHighName);
        }
        
        if(ObjectFind(0, oldLowName) >= 0)
@@ -835,8 +836,9 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
              ObjectSetInteger(0, brokenName, OBJPROP_STYLE, STYLE_DOT);
              ObjectSetInteger(0, brokenName, OBJPROP_COLOR, clrDimGray);
              ObjectSetInteger(0, brokenName, OBJPROP_SELECTABLE, false);
+             
+             ObjectDelete(0, oldLowName);
           }
-          ObjectDelete(0, oldLowName);
        }
     }
     
