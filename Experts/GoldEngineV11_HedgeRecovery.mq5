@@ -142,7 +142,7 @@ input string   InpOpenRouterAPIKey   = ""; // OpenRouter API Key (openrouter.ai)
 input string   InpOpenRouterModel    = "meta-llama/llama-3.1-8b-instruct"; // OpenRouter Model Name
 input bool     InpUseAIEngines       = true;    // Enable AI Brain Integration
 input ENUM_AI_ENGINE InpAIEngineSelection = AI_GROQ; // AI Engine Selection
-input int      InpMinConviction      = 50;      // Minimum AI Conviction to trade (0-100)
+input int      InpMinConviction      = 1;      // Minimum AI Conviction to trade (0-100)
 
 enum ENUM_DB_POSITION
 {
@@ -2428,7 +2428,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
        double swingSL = (structuralSL > 0.0) ? structuralSL : 0.0;
        double swingTP = (structuralTP > 0.0) ? structuralTP : 0.0;
        
-       if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+       if(g_aiDecision == "BUY" )
        {
           if(swingSL <= 0.0 || swingSL >= currentBid) swingSL = NormalizeDouble(currentBid - (2.5 * g_stopLossDist), _Digits);
           if(swingTP <= 0.0 || swingTP <= currentAsk) swingTP = NormalizeDouble(currentBid + (4.0 * g_stopLossDist), _Digits);
@@ -2442,7 +2442,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
           trade.Buy(swingLotSize, _Symbol, currentAsk, swingSL, swingTP, "GE_SWING");
           return true;
        }
-       else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+       else if(g_aiDecision == "SELL" )
        {
           if(swingSL <= 0.0 || swingSL <= currentAsk) swingSL = NormalizeDouble(currentAsk + (2.5 * g_stopLossDist), _Digits);
           if(swingTP <= 0.0 || swingTP >= currentBid) swingTP = NormalizeDouble(currentAsk - (4.0 * g_stopLossDist), _Digits);
@@ -2470,7 +2470,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
           double scalpingSL = (structuralSL > 0.0 && structuralSL < currentAsk) ? structuralSL : NormalizeDouble(currentBid - 0.60, _Digits);
           double scalpingTP = (structuralTP > 0.0) ? structuralTP : NormalizeDouble(currentBid + 0.80, _Digits);
           
-          if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+          if(g_aiDecision == "BUY" )
           {
              // Validate and cap Stop Loss
              double maxRiskSL = NormalizeDouble(currentBid - (2.0 * g_stopLossDist), _Digits);
@@ -2479,7 +2479,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
              trade.Buy(finalLotSize, _Symbol, currentAsk, scalpingSL, scalpingTP, "AI Scalp BUY");
              return true;
           }
-          else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+          else if(g_aiDecision == "SELL" )
           {
              scalpingSL = (structuralSL > currentBid) ? structuralSL : NormalizeDouble(currentAsk + 0.60, _Digits);
              scalpingTP = (structuralTP > 0.0) ? structuralTP : NormalizeDouble(currentAsk - 0.80, _Digits);
@@ -2498,7 +2498,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
           double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
           double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
           
-          if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+          if(g_aiDecision == "BUY" )
           {
              double limitPrice = (bullOB_High > 0.0) ? bullOB_High : ((fvgType == 1) ? fvgHigh : NormalizeDouble(currentEMA, _Digits));
              double pullbackSL = (structuralSL > 0.0 && structuralSL < limitPrice) ? structuralSL : ((bullOB_Low > 0.0) ? bullOB_Low : NormalizeDouble(limitPrice - 0.80, _Digits));
@@ -2525,7 +2525,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
              }
              return true;
           }
-          else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+          else if(g_aiDecision == "SELL" )
           {
              double limitPrice = (bearOB_Low > 0.0) ? bearOB_Low : ((fvgType == -1) ? fvgLow : NormalizeDouble(currentEMA, _Digits));
              double pullbackSL = (structuralSL > limitPrice) ? structuralSL : ((bearOB_High > 0.0) ? bearOB_High : NormalizeDouble(limitPrice + 0.80, _Digits));
@@ -2573,11 +2573,11 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
            double maxSellRiskSL = NormalizeDouble(sellStopPrice + (2.0 * g_stopLossDist), _Digits);
            if(sellSL > maxSellRiskSL) sellSL = maxSellRiskSL;
           
-          if(g_dailySentiment != "SELL_ONLY")
+          if(true)
           {
              trade.BuyStop(finalLotSize, buyStopPrice, _Symbol, buySL, buyTP, ORDER_TIME_GTC, 0, "AI Straddle BUY");
           }
-          if(g_dailySentiment != "BUY_ONLY")
+          if(true)
           {
               trade.SellStop(finalLotSize, sellStopPrice, _Symbol, sellSL, sellTP, ORDER_TIME_GTC, 0, "AI Straddle SELL");
            }
@@ -2617,7 +2617,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
               bool triggerBuy  = aiActive ? true : ((prevClose > ch_high) && (prevClose >= curr_ema200));
               bool triggerSell = aiActive ? true : ((prevClose < ch_low)  && (prevClose < curr_ema200));
               
-              if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+              if(g_aiDecision == "BUY" )
               {
                  if(!triggerBuy)
                  {
@@ -2634,7 +2634,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
                  trade.Buy(finalLotSize, _Symbol, currentAsk, buySL, buyTP, "AI Donchian BUY");
                  return true;
               }
-              else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+              else if(g_aiDecision == "SELL" )
               {
                  if(!triggerSell)
                  {
@@ -2692,7 +2692,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
               bool triggerBuy  = aiActive ? true : ((prevClose > ch_high) && (prevClose >= curr_ema200) && volOk);
               bool triggerSell = aiActive ? true : ((prevClose < ch_low)  && (prevClose < curr_ema200)  && volOk);
               
-              if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+              if(g_aiDecision == "BUY" )
               {
                  if(!triggerBuy)
                  {
@@ -2708,7 +2708,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
                  trade.Buy(finalLotSize, _Symbol, currentAsk, buySL, buyTP, "AI Vol Breakout BUY");
                  return true;
               }
-              else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+              else if(g_aiDecision == "SELL" )
               {
                  if(!triggerSell)
                  {
@@ -2787,7 +2787,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
                   bool rsiSellOk = (currRSI >= 35.0 && currRSI <= 55.0);
                   bool trendSellOk = (close1 < curr_ema200 && close1 < currentVWAP);
                   
-                  if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
+                  if(g_aiDecision == "BUY" )
                   {
                      if(!aiActive && !(trendBuyOk && pullbackBuy && triggerBuy && volOk && rsiBuyOk))
                      {
@@ -2803,7 +2803,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
                      trade.Buy(finalLotSize, _Symbol, currentAsk, buySL, buyTP, "AI VWAP Pullback BUY");
                      return true;
                   }
-                  else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+                  else if(g_aiDecision == "SELL" )
                   {
                      if(!aiActive && !(trendSellOk && pullbackSell && triggerSell && volOk && rsiSellOk))
                      {
@@ -2820,7 +2820,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
                      return true;
                   }
                }
-              else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
+              else if(g_aiDecision == "SELL" )
               {
                  double sellSL = currentBid + pullbackSL;
                  double sellTP = currentBid - pullbackTP;
