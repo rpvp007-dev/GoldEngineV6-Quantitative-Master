@@ -2640,7 +2640,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
     }
 
     // --- Execute Specific Strategy if Selected by AI ---
-    if(aiActive && !useReversionMode)
+    if(aiActive)
     {
        if(g_aiStrategy == "SCALPING")
        {
