@@ -2450,6 +2450,37 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
    double convictionMultiplier = 1.0;
    if(aiActive)
    {
+      // --- Context-Aware Over-Extension Entry Guard ---
+      double nHighs[];
+      double nLows[];
+      string mDesc = "";
+      GetUntestedMagnets(nHighs, nLows, mDesc);
+      double goldCeiling = (ArraySize(nHighs) > 0) ? nHighs[0] : 0.0;
+      double aquaFloor = (ArraySize(nLows) > 0) ? nLows[0] : 0.0;
+      
+      bool isRangeStrategy = (g_aiStrategy == "MEAN_REVERSION" || g_aiStrategy == "SCALPING" || g_aiStrategy == "NONE" || g_aiStrategy == "");
+      
+      if(isRangeStrategy)
+      {
+         double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+         
+         if(g_aiDecision == "BUY" && goldCeiling > 0.0 && currentAsk >= goldCeiling - 1.50)
+         {
+            PrintFormat("[Over-Extension Guard] BUY blocked. Price %.2f is too close to Golden Line Ceiling: %.2f for range strategy: %s", currentAsk, goldCeiling, g_aiStrategy);
+            g_aiDecision = "BLOCKED";
+            DrawChartStatus(currentADX, currentATR, (rawRegime == "REVERSION"));
+            return false;
+         }
+         else if(g_aiDecision == "SELL" && aquaFloor > 0.0 && currentBid <= aquaFloor + 1.50)
+         {
+            PrintFormat("[Over-Extension Guard] SELL blocked. Price %.2f is too close to Aqua Line Floor: %.2f for range strategy: %s", currentBid, aquaFloor, g_aiStrategy);
+            g_aiDecision = "BLOCKED";
+            DrawChartStatus(currentADX, currentATR, (rawRegime == "REVERSION"));
+            return false;
+         }
+      }
+
       // Block trades below the threshold
       if(g_aiConviction < InpMinConviction)
       {
