@@ -1774,6 +1774,30 @@ void QueryAIActiveTradeManagement()
 //+------------------------------------------------------------------+
 //| Extract recent closed trades history under this magic number     |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Get the current active trading session based on broker hour      |
+//+------------------------------------------------------------------+
+string GetActiveSession()
+{
+   datetime serverTime = TimeCurrent();
+   MqlDateTime dt;
+   TimeToStruct(serverTime, dt);
+   int hour = dt.hour;
+   
+   string sessions = "";
+   if(hour >= 3 && hour < 12) sessions += "Asian (Tokyo/Sydney)";
+   if(hour >= 10 && hour < 19) {
+      if(sessions != "") sessions += " overlapping with ";
+      sessions += "London";
+   }
+   if(hour >= 15 || hour < 0) {
+      if(sessions != "") sessions += " overlapping with ";
+      sessions += "New York";
+   }
+   if(sessions == "") sessions = "Late US / Pre-Asia quiet hours";
+   return sessions;
+}
+
 void GetRecentTradesHistory(string &historyStr)
 {
    historyStr = "";
@@ -2362,21 +2386,23 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
    double nearestLows[];
    GetUntestedMagnets(nearestHighs, nearestLows, magnetDesc);
 
+   string activeSession = GetActiveSession();
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   double marginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+
    string prompt = StringFormat(
-      "Gold (XAUUSD) setup analysis. Current price=%.2f. Trend Direction: %s. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
+      "Gold (XAUUSD) setup analysis. Current price=%.2f. Active Session: %s. Account Capital: Balance=%.2f, Equity=%.2f, Free Margin=%.2f, Margin Level=%.1f%%. "+
+      "Trend Direction: %s. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
       "Upcoming High-Impact News today: %s. "+
       "Price History (Active Timeframe): %s. "+
       "Macro Price History (Higher Timeframe): %s. "+
       "Candle Patterns (Last 3 Bars): %s. "+
       "Recent closed trades history: %s. "+
       "Untested Price Magnets (Liquidity Pools): %s. "+"ICT Market Structure (Order Blocks & Fair Value Gaps): %s. "+
-      "As a professional self-correcting quant trader, analyze the macro trend, price history, candle patterns (like Hammer/Pin Bar wicks representing rejection at support/resistance floors), and GNN magnets. "+
-      "Instructions: 1. You are highly encouraged to swing-trade using LONG_TERM horizon when you see daily trend direction or wick rejections at key levels, as it uses 70% smaller lots and wide SL/TP to run for hours. 2. During strong trends (ADX > 25.0 and clear direction above/below EMA200/VWAP), you are highly encouraged to execute a LONG_TERM trade in the direction of the trend (e.g., using VOLUME_BREAKOUT or DONCHIAN_BREAKOUT) to capture a major multi-hour move (targeting 30-50+ points) with a wide Stop Loss. 2. If the price has deeply retraced to a macro GNN support floor (like Aqua lines) and you detect a bullish rejection (Hammers/long lower shadows), issue a LONG_TERM BUY swing trade targeting the Golden GNN resistance ceiling (50+ points above) with a wide Stop Loss below the support floor. 3. Conversely, if price has spiked to a Golden resistance ceiling and shows bearish rejection (Shooting Stars), issue a LONG_TERM SELL swing trade targeting the Aqua support floor. 4. LONG_TERM trades bypass all time decay exits and are intended to run for 4-5 hours to secure large trend gains, even with small lot sizes. 5. CRITICAL: Do NOT execute SELL trades when the price is close to (within 5 points of) an untested GNN Support floor (Aqua line), and do NOT execute BUY trades when the price is close to (within 5 points of) an untested GNN Resistance ceiling (Golden line). Selling the support floor or buying the resistance ceiling leads to instant losses on pullbacks. Wait for a breakout or trade the bounce. Identify wick rejections and adjust your decision or stop loss buffer to let wicks breathe. 7. RANGE FLUX PATIENCE: When price is oscillating inside the GNN Golden/Aqua channel, be patient. Bounces are normal. The system automatically bypasses soft-stops inside the channel and will execute a break-even escape (+$0.20) on pullbacks rather than taking range losses. 6. Under ICT Concepts: You are highly encouraged to buy when the price retraces to a Bullish Order Block, or sell when it rises to a Bearish Order Block. If a breakout leaves an FVG, you can choose to enter a limit order in the FVG zone rather than buying the top or selling the bottom. "+
-      "8. MACROECONOMIC NEWS RULES (Gold vs USD): "
-      "A. Labor Market (NFP, Unemployment, Jobless Claims): Strong jobs data (Forecast > Previous or low unemployment) is bearish for Gold (USD strength); weak jobs data is bullish for Gold. "
-      "B. Inflation (CPI, PPI, PCE): Higher inflation is short-term bearish for Gold (rate hike fears); lower inflation is bullish for Gold (rate cut expectations). "
-      "C. Interest Rates (FOMC): Hawkishness/Hikes = bearish Gold; Dovishness/Cuts = bullish Gold. "
-      "D. Post-Release Momentum: If a news event triggers a large breakout candle or wick rejection, trade in the direction of that initial reaction (buy Gold on USD weakness, sell Gold on USD strength). "+
+      "As a professional self-correcting quant trader, analyze the macro trend, session context (prioritize reversion in Tokyo/Asian hours, breakouts in London/NY), price history, account equity (trade conservatively if margin is low or recent trades show losses), and wicks representing rejection. "+
+      "Instructions: 1. You are highly encouraged to swing-trade using LONG_TERM horizon when you see daily trend direction or clear wick rejections at key levels. 2. During strong trends (ADX > 25.0 and price above/below EMA200/VWAP), execute a LONG_TERM trade in the direction of the trend (e.g., using VOLUME_BREAKOUT or DONCHIAN_BREAKOUT) to capture a major multi-hour move. 3. If recent closed trades show consecutive losses (negative profits), you MUST raise your conviction requirement (be extremely defensive, only enter on A+ setups with >80 conviction). 4. If free margin is low, prioritize holding capital and issue 'HOLD'. 5. Do NOT execute SELL trades when the price is close to (within 5 points of) an untested GNN Support floor (Aqua line), and do NOT execute BUY trades when the price is close to (within 5 points of) an untested GNN Resistance ceiling (Golden line). "+
       "Respond strictly with a JSON object containing: "+
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
@@ -2385,9 +2411,9 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       "'horizon' ('SHORT_TERM' or 'LONG_TERM'), "+
       "'stop_loss_price' (double target stop loss price level, or 0.0 to use default), "+
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
-      "'reason' (short 10 words explaining decision and why you adjusted based on recent trades). "+
-      "Example output: { 'decision': 'BUY', 'conviction': 95, 'regime': 'REVERSION', 'strategy': 'MEAN_REVERSION', 'horizon': 'LONG_TERM', 'stop_loss_price': 4065.00, 'take_profit_price': 4125.00, 'reason': 'Deep retracement to Aqua support with Hammer wick rejection' }.",
-      prevClose, trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, candlePatterns, tradeHistory, magnetDesc, ictDesc
+      "'reason' (short 10 words explaining decision and why you adjusted based on recent trades).",
+      prevClose, activeSession, balance, equity, freeMargin, marginLevel,
+      trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, candlePatterns, tradeHistory, magnetDesc, ictDesc
    );
 
    bool aiActive = false;
