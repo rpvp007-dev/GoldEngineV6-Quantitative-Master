@@ -141,6 +141,8 @@ input string   InpGroqAPIKey         = ""; // Groq API Key (console.groq.com)
 input string   InpOpenRouterAPIKey   = ""; // OpenRouter API Key (openrouter.ai)
 input string   InpOpenRouterModel    = "google/gemma-4-31b-it"; // OpenRouter Model Name
 input bool     InpUseAIEngines       = true;    // Enable AI Brain Integration
+input bool     InpUseAIVision        = false;   // Enable AI Multimodal Vision (Requires OpenRouter Vision Model)
+
 input ENUM_AI_ENGINE InpAIEngineSelection = AI_GROQ; // AI Engine Selection
 input int      InpMinConviction      = 1;      // Minimum AI Conviction to trade (0-100)
 
@@ -1383,8 +1385,57 @@ bool QueryOpenRouterDirect(string prompt, string &responseText)
    if(InpOpenRouterAPIKey == "" || InpOpenRouterAPIKey == "PASTE_YOUR_API_KEY_HERE") return false;
    
    string cleanPrompt = prompt;
-   StringReplace(cleanPrompt, "\"", "\"");
-   string requestBody = "{\"model\":\"" + InpOpenRouterModel + "\",\"messages\":[{\"role\":\"user\",\"content\":\"" + cleanPrompt + "\"}],\"temperature\":0.2,\"response_format\":{\"type\":\"json_object\"}}";
+   StringReplace(cleanPrompt, "\"", "\\\"");
+   
+   string requestBody = "";
+   if(InpUseAIVision)
+   {
+      string filename = "AIVision.png";
+      ResetLastError();
+      if(ChartScreenShot(0, filename, 800, 600, ALIGN_RIGHT))
+      {
+         int handle = FileOpen(filename, FILE_BIN|FILE_READ);
+         if(handle != INVALID_HANDLE)
+         {
+            ulong fileSize = FileSize(handle);
+            uchar fileData[];
+            ArrayResize(fileData, (int)fileSize);
+            FileReadArray(handle, fileData);
+            FileClose(handle);
+            
+            uchar key[];
+            uchar base64Data[];
+            ResetLastError();
+            int encRes = CryptEncode(CRYPT_BASE64, fileData, key, base64Data);
+            if(encRes > 0)
+            {
+               string base64Str = CharArrayToString(base64Data, 0, WHOLE_ARRAY, CP_UTF8);
+               StringReplace(base64Str, "\r", "");
+               StringReplace(base64Str, "\n", "");
+               
+               requestBody = "{\"model\":\"" + InpOpenRouterModel + "\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"" + cleanPrompt + "\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64," + base64Str + "\"}}]}],\"temperature\":0.2,\"response_format\":{\"type\":\"json_object\"}}";
+            }
+            else
+            {
+               Print("[AI Vision] Base64 encoding failed. Error: ", GetLastError());
+            }
+         }
+         else
+         {
+            Print("[AI Vision] Failed to open screenshot file. Error: ", GetLastError());
+         }
+      }
+      else
+      {
+         Print("[AI Vision] ChartScreenShot failed. Error: ", GetLastError());
+      }
+   }
+   
+   if(requestBody == "")
+   {
+      requestBody = "{\"model\":\"" + InpOpenRouterModel + "\",\"messages\":[{\"role\":\"user\",\"content\":\"" + cleanPrompt + "\"}],\"temperature\":0.2,\"response_format\":{\"type\":\"json_object\"}}";
+   }
+   
    string url = "https://openrouter.ai/api/v1/chat/completions";
    string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpOpenRouterAPIKey + "\r\nHTTP-Referer: http://localhost\r\nX-Title: GoldEngine\r\n";
    
@@ -1409,6 +1460,7 @@ bool QueryOpenRouterDirect(string prompt, string &responseText)
    }
    return false;
 }
+
 
 bool QueryGroqDirect(string prompt, string &responseText)
 {
