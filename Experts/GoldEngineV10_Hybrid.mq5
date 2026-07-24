@@ -485,6 +485,7 @@ void CreateLabel(string name, int x, int y, string text, int fontSize, color clr
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
    ObjectSetString(0, name, OBJPROP_TEXT, text);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
 }
 
@@ -506,6 +507,7 @@ void CreatePanelBg(string name, int x, int y, int width, int height, color bgCol
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, name, OBJPROP_COLOR, borderColor);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
 }
 
@@ -646,6 +648,7 @@ void CreateInterface()
    ObjectSetInteger(0, btnName, OBJPROP_HIDDEN, true);
    
    UpdateButtonState();
+   ChartSetInteger(0, CHART_FOREGROUND, false);
    ChartRedraw();
 }
 
@@ -2341,8 +2344,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
        
        if(g_aiDecision == "BUY" && (g_dailySentiment != "SELL_ONLY"))
        {
-          if(swingSL == 0.0) swingSL = NormalizeDouble(currentBid - (2.5 * g_stopLossDist), _Digits);
-          if(swingTP == 0.0) swingTP = NormalizeDouble(currentBid + (4.0 * g_stopLossDist), _Digits);
+          if(swingSL <= 0.0 || swingSL >= currentBid) swingSL = NormalizeDouble(currentBid - (2.5 * g_stopLossDist), _Digits);
+          if(swingTP <= 0.0 || swingTP <= currentAsk) swingTP = NormalizeDouble(currentBid + (4.0 * g_stopLossDist), _Digits);
           
           double swingLotSize = NormalizeDouble(finalLotSize * 0.30, 2);
           double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
@@ -2355,8 +2358,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
        }
        else if(g_aiDecision == "SELL" && (g_dailySentiment != "BUY_ONLY"))
        {
-          if(swingSL == 0.0) swingSL = NormalizeDouble(currentAsk + (2.5 * g_stopLossDist), _Digits);
-          if(swingTP == 0.0) swingTP = NormalizeDouble(currentAsk - (4.0 * g_stopLossDist), _Digits);
+          if(swingSL <= 0.0 || swingSL <= currentAsk) swingSL = NormalizeDouble(currentAsk + (2.5 * g_stopLossDist), _Digits);
+          if(swingTP <= 0.0 || swingTP >= currentBid) swingTP = NormalizeDouble(currentAsk - (4.0 * g_stopLossDist), _Digits);
           
           double swingLotSize = NormalizeDouble(finalLotSize * 0.30, 2);
           double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
