@@ -795,12 +795,66 @@ void DrawChartStatus(double currentADX, double currentATR, bool reversionModeAct
    string tempStr = "";
    GetUntestedMagnets(nearestHighs, nearestLows, tempStr);
    
-   // Clean up any old lines first
-   for(int i = 1; i <= 3; i++)
-   {
-      ObjectDelete(0, "MagnetHighLine_" + (string)i);
-      ObjectDelete(0, "MagnetLowLine_" + (string)i);
-   }
+       // Preserve broken lines before updating
+    for(int i = 1; i <= 3; i++)
+    {
+       string oldHighName = "MagnetHighLine_" + (string)i;
+       string oldLowName = "MagnetLowLine_" + (string)i;
+       
+       if(ObjectFind(0, oldHighName) >= 0)
+       {
+          double oldPrice = ObjectGetDouble(0, oldHighName, OBJPROP_PRICE);
+          bool stillActive = false;
+          for(int j = 0; j < ArraySize(nearestHighs); j++)
+          {
+             if(MathAbs(nearestHighs[j] - oldPrice) < 0.01) { stillActive = true; break; }
+          }
+          if(!stillActive && oldPrice > 0.0)
+          {
+             string brokenName = "BrokenHigh_" + (string)TimeCurrent() + "_" + DoubleToString(oldPrice, 2);
+             ObjectCreate(0, brokenName, OBJ_HLINE, 0, 0, oldPrice);
+             ObjectSetInteger(0, brokenName, OBJPROP_STYLE, STYLE_DOT);
+             ObjectSetInteger(0, brokenName, OBJPROP_COLOR, clrDimGray);
+             ObjectSetInteger(0, brokenName, OBJPROP_SELECTABLE, false);
+          }
+          ObjectDelete(0, oldHighName);
+       }
+       
+       if(ObjectFind(0, oldLowName) >= 0)
+       {
+          double oldPrice = ObjectGetDouble(0, oldLowName, OBJPROP_PRICE);
+          bool stillActive = false;
+          for(int j = 0; j < ArraySize(nearestLows); j++)
+          {
+             if(MathAbs(nearestLows[j] - oldPrice) < 0.01) { stillActive = true; break; }
+          }
+          if(!stillActive && oldPrice > 0.0)
+          {
+             string brokenName = "BrokenLow_" + (string)TimeCurrent() + "_" + DoubleToString(oldPrice, 2);
+             ObjectCreate(0, brokenName, OBJ_HLINE, 0, 0, oldPrice);
+             ObjectSetInteger(0, brokenName, OBJPROP_STYLE, STYLE_DOT);
+             ObjectSetInteger(0, brokenName, OBJPROP_COLOR, clrDimGray);
+             ObjectSetInteger(0, brokenName, OBJPROP_SELECTABLE, false);
+          }
+          ObjectDelete(0, oldLowName);
+       }
+    }
+    
+    // Clean up excess broken lines to prevent chart memory overload
+    int totalObjects = ObjectsTotal(0, 0, OBJ_HLINE);
+    int brokenCount = 0;
+    for(int k = totalObjects - 1; k >= 0; k--)
+    {
+       string objName = ObjectName(0, k, 0, OBJ_HLINE);
+       if(StringFind(objName, "BrokenHigh_") == 0 || StringFind(objName, "BrokenLow_") == 0)
+       {
+          brokenCount++;
+          if(brokenCount > 20)
+          {
+             ObjectDelete(0, objName);
+          }
+       }
+    }
    
    // Draw High Magnets (closest to furthest)
    color goldColors[3] = { C'255,215,0', C'218,165,32', C'184,134,11' }; // Gold, Goldenrod, Dark Goldenrod
@@ -1472,6 +1526,27 @@ void ManageActivePositions()
             double currentTP = PositionGetDouble(POSITION_TP);
             double currentVolume = PositionGetDouble(POSITION_VOLUME);
             datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
+             
+             // --- Boundary Guard Exit (Exit immediately on opposite GNN/Magnet line touch) ---
+             double nearestHighs[];
+             double nearestLows[];
+             string dummy = "";
+             GetUntestedMagnets(nearestHighs, nearestLows, dummy);
+             double goldCeiling = (ArraySize(nearestHighs) > 0) ? nearestHighs[0] : 0.0;
+             double aquaFloor = (ArraySize(nearestLows) > 0) ? nearestLows[0] : 0.0;
+             
+             if(type == POSITION_TYPE_BUY && goldCeiling > 0.0 && currentBid >= goldCeiling)
+             {
+                PrintFormat("[Boundary Guard Exit] Closing BUY trade #%I64u at %.2f. Hit Golden Line Ceiling: %.2f", ticket, currentBid, goldCeiling);
+                trade.PositionClose(ticket);
+                continue;
+             }
+             else if(type == POSITION_TYPE_SELL && aquaFloor > 0.0 && currentAsk <= aquaFloor)
+             {
+                PrintFormat("[Boundary Guard Exit] Closing SELL trade #%I64u at %.2f. Hit Aqua Line Floor: %.2f", ticket, currentAsk, aquaFloor);
+                trade.PositionClose(ticket);
+                continue;
+             }
             
             if(g_enableTimeDecay && !isSwingPosition)
             {
