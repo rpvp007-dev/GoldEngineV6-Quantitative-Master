@@ -127,6 +127,7 @@ enum ENUM_TF_MODE {
 enum ENUM_AI_ENGINE {
    AI_GROQ,            // Groq Llama-3.1 (Recommended: Fast & High Quotas)
    AI_GEMINI,          // Gemini Flash
+   AI_OPENROUTER,      // OpenRouter
    AI_BOTH_FAILOVER    // Gemini first, failover to Groq
 };
 
@@ -137,6 +138,8 @@ input ENUM_TF_MODE InpTimeframeMode = TF_AUTO;    // Target Chart Timeframe Mode
 input group "--- AI Engine Settings ---"
 input string   InpGeminiAPIKey       = ""; // Gemini API Key (aistudio.google.com)
 input string   InpGroqAPIKey         = ""; // Groq API Key (console.groq.com)
+input string   InpOpenRouterAPIKey   = ""; // OpenRouter API Key (openrouter.ai)
+input string   InpOpenRouterModel    = "meta-llama/llama-3.1-8b-instruct"; // OpenRouter Model Name
 input bool     InpUseAIEngines       = true;    // Enable AI Brain Integration
 input ENUM_AI_ENGINE InpAIEngineSelection = AI_GROQ; // AI Engine Selection
 input int      InpMinConviction      = 50;      // Minimum AI Conviction to trade (0-100)
@@ -1305,6 +1308,38 @@ bool QueryGeminiDirect(string prompt, string &responseText)
    return false;
 }
 
+bool QueryOpenRouterDirect(string prompt, string &responseText)
+{
+   if(InpOpenRouterAPIKey == "" || InpOpenRouterAPIKey == "PASTE_YOUR_API_KEY_HERE") return false;
+   
+   string cleanPrompt = prompt;
+   StringReplace(cleanPrompt, "\"", "\"");
+   string requestBody = "{\"model\":\"" + InpOpenRouterModel + "\",\"messages\":[{\"role\":\"user\",\"content\":\"" + cleanPrompt + "\"}],\"temperature\":0.2,\"response_format\":{\"type\":\"json_object\"}}";
+   string url = "https://openrouter.ai/api/v1/chat/completions";
+   string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpOpenRouterAPIKey + "\r\nHTTP-Referer: http://localhost\r\nX-Title: GoldEngine\r\n";
+   
+   char post[];
+   char result[];
+   string responseHeaders = "";
+   int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
+   if(bytes > 0 && post[bytes-1] == 0) ArrayResize(post, bytes - 1);
+   
+   ResetLastError();
+   int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
+   if(res == 200)
+   {
+      responseText = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+      Print("[OpenRouter Success] Response: ", responseText);
+      return true;
+   }
+   else
+   {
+      string err = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+      Print("[OpenRouter Fail] HTTP Status: ", res, ", Error Response: ", err);
+   }
+   return false;
+}
+
 bool QueryGroqDirect(string prompt, string &responseText)
 {
    if(InpGroqAPIKey == "" || InpGroqAPIKey == "PASTE_YOUR_API_KEY_HERE") return false;
@@ -1351,7 +1386,13 @@ bool CallAI(string prompt, string &responseText)
       return QueryGeminiDirect(prompt, responseText);
    }
    
-   // --- Option 3: Gemini first, failover to Groq ---
+   // --- Option 3: OpenRouter ---
+   if(InpAIEngineSelection == AI_OPENROUTER)
+   {
+      return QueryOpenRouterDirect(prompt, responseText);
+   }
+   
+   // --- Option 4: Gemini first, failover to Groq ---
    if(InpAIEngineSelection == AI_BOTH_FAILOVER)
    {
       if(QueryGeminiDirect(prompt, responseText)) return true;
@@ -3102,7 +3143,13 @@ void TestAIEngines()
       string resp = "";
       success = QueryGeminiDirect("Respond strictly with status OK in json format. Example: {\"status\":\"OK\"}", resp);
    }
-   else if(InpAIEngineSelection == AI_BOTH_FAILOVER)
+   else if(InpAIEngineSelection == AI_OPENROUTER)
+    {
+       name = "OpenRouter";
+       string resp = "";
+       success = QueryOpenRouterDirect("Respond strictly with status OK in json format. Example: {\"status\":\"OK\"}", resp);
+    }
+    else if(InpAIEngineSelection == AI_BOTH_FAILOVER)
    {
       name = "Gemini & Groq (Failover)";
       string resp = "";
