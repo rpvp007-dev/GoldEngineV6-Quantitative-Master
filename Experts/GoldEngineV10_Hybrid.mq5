@@ -1545,12 +1545,17 @@ void QueryAIActiveTradeManagement()
                j, iOpen(_Symbol, _Period, j), iHigh(_Symbol, _Period, j), iLow(_Symbol, _Period, j), iClose(_Symbol, _Period, j));
          }
          
+         string comment = PositionGetString(POSITION_COMMENT);
          string prompt = StringFormat(
-            "Gold (XAUUSD) active position management review. Type=%s, EntryPrice=%.2f, CurrentPrice=%.2f, CurrentSL=%.2f, CurrentProfit=%.2f. "+
+            "Gold (XAUUSD) active position management review. TradeType/Strategy=%s, Type=%s, EntryPrice=%.2f, CurrentPrice=%.2f, CurrentSL=%.2f, CurrentProfit=%.2f. "+
             "Recent 3 closed candles: %s. "+
-            "Evaluate position exit/trail. Respond strictly with a JSON object containing: 'action' ('HOLD', 'TIGHTEN', 'WIDEN', or 'CLOSE'), 'stop_distance' (double dollar offset from current price, e.g. 0.70), and 'reason' (short 10 words). "+
+            "Instructions: "+
+            "1. If TradeType/Strategy is 'GE_SWING' (Long-Term Swing trade), you must be highly patient. Do NOT close early or tighten SL for minor pullbacks. Let it breathe through temporary retracements of 3-5 USD in value as long as the macro H1/Daily structure is intact. Only close or tighten if opposite trend structure is confirmed. "+
+            "2. If TradeType is 'SCALPING', trail SL closely to lock in small gains quickly. "+
+            "3. If TradeType is 'BREAKOUT' or 'MOMENTUM', trail SL tightly behind momentum bars. "+
+            "Evaluate position exit/trail. Respond strictly with a JSON object containing: 'action' ('HOLD', 'TIGHTEN', 'WIDEN', or 'CLOSE'), 'stop_distance' (double dollar offset from current price, e.g. 1.50), and 'reason' (short 10 words). "+
             "Example format: { 'action': 'TIGHTEN', 'stop_distance': 0.60, 'reason': 'Bearish trend forming close' }.",
-            (type == POSITION_TYPE_BUY ? "BUY" : "SELL"), entryPrice, currentPrice, currentSL, currentProfit, barsHistory
+            comment, (type == POSITION_TYPE_BUY ? "BUY" : "SELL"), entryPrice, currentPrice, currentSL, currentProfit, barsHistory
          );
          
          string responseText = "";
