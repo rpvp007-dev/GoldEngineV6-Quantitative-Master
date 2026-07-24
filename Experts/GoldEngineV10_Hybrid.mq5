@@ -1535,18 +1535,22 @@ void ManageActivePositions()
              double goldCeiling = (ArraySize(nearestHighs) > 0) ? nearestHighs[0] : 0.0;
              double aquaFloor = (ArraySize(nearestLows) > 0) ? nearestLows[0] : 0.0;
              
-             if(type == POSITION_TYPE_BUY && goldCeiling > 0.0 && currentBid >= goldCeiling)
-             {
-                PrintFormat("[Boundary Guard Exit] Closing BUY trade #%I64u at %.2f. Hit Golden Line Ceiling: %.2f", ticket, currentBid, goldCeiling);
-                trade.PositionClose(ticket);
-                continue;
-             }
-             else if(type == POSITION_TYPE_SELL && aquaFloor > 0.0 && currentAsk <= aquaFloor)
-             {
-                PrintFormat("[Boundary Guard Exit] Closing SELL trade #%I64u at %.2f. Hit Aqua Line Floor: %.2f", ticket, currentAsk, aquaFloor);
-                trade.PositionClose(ticket);
-                continue;
-             }
+             bool isBreakoutTrade = (StringFind(comment, "Breakout") >= 0 || StringFind(comment, "Donchian") >= 0 || StringFind(comment, "Straddle") >= 0);
+            if(!isBreakoutTrade)
+            {
+               if(type == POSITION_TYPE_BUY && goldCeiling > 0.0 && currentBid >= goldCeiling)
+               {
+                  PrintFormat("[Boundary Guard Exit] Closing BUY trade #%I64u at %.2f. Hit Golden Line Ceiling: %.2f", ticket, currentBid, goldCeiling);
+                  trade.PositionClose(ticket);
+                  continue;
+               }
+               else if(type == POSITION_TYPE_SELL && aquaFloor > 0.0 && currentAsk <= aquaFloor)
+               {
+                  PrintFormat("[Boundary Guard Exit] Closing SELL trade #%I64u at %.2f. Hit Aqua Line Floor: %.2f", ticket, currentAsk, aquaFloor);
+                  trade.PositionClose(ticket);
+                  continue;
+               }
+            }
             
             if(g_enableTimeDecay && !isSwingPosition)
             {

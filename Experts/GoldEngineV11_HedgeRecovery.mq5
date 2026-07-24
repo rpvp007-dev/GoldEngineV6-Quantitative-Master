@@ -1570,22 +1570,22 @@ void ManageActivePositions()
              double aquaFloor = (ArraySize(nearestLows) > 0) ? nearestLows[0] : 0.0;
              
              bool isRecoveryTrade = (posComment == "RECOVERY_ENTRY" || posComment == "HEDGE_FREEZE");
-             
-             if(!isRecoveryTrade)
-             {
-                if(type == POSITION_TYPE_BUY && goldCeiling > 0.0 && currentBid >= goldCeiling)
-                {
-                   PrintFormat("[Boundary Guard Exit] Closing BUY trade #%I64u at %.2f. Hit Golden Line Ceiling: %.2f", ticket, currentBid, goldCeiling);
-                   trade.PositionClose(ticket);
-                   continue;
-                }
-                else if(type == POSITION_TYPE_SELL && aquaFloor > 0.0 && currentAsk <= aquaFloor)
-                {
-                   PrintFormat("[Boundary Guard Exit] Closing SELL trade #%I64u at %.2f. Hit Aqua Line Floor: %.2f", ticket, currentAsk, aquaFloor);
-                   trade.PositionClose(ticket);
-                   continue;
-                }
-             }
+            bool isBreakoutTrade = (StringFind(posComment, "Breakout") >= 0 || StringFind(posComment, "Donchian") >= 0 || StringFind(posComment, "Straddle") >= 0);
+            if(!isRecoveryTrade && !isBreakoutTrade)
+            {
+               if(type == POSITION_TYPE_BUY && goldCeiling > 0.0 && currentBid >= goldCeiling)
+               {
+                  PrintFormat("[Boundary Guard Exit] Closing BUY trade #%I64u at %.2f. Hit Golden Line Ceiling: %.2f", ticket, currentBid, goldCeiling);
+                  trade.PositionClose(ticket);
+                  continue;
+               }
+               else if(type == POSITION_TYPE_SELL && aquaFloor > 0.0 && currentAsk <= aquaFloor)
+               {
+                  PrintFormat("[Boundary Guard Exit] Closing SELL trade #%I64u at %.2f. Hit Aqua Line Floor: %.2f", ticket, currentAsk, aquaFloor);
+                  trade.PositionClose(ticket);
+                  continue;
+               }
+            }
             
             if(g_enableTimeDecay && !isSwingPosition)
             {
