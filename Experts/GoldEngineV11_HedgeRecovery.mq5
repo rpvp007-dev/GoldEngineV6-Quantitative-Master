@@ -167,6 +167,7 @@ input double   InpLotSize          = 0.10;     // Fixed Lot Size (If Compounding
 input double   InpTargetRiskUSD    = 25.00;    // Target dollar risk per trade ($)
 input ulong    InpMagicNumber      = 123456;   // Magic Number
 input int      InpMaxConcurrentTrades = 2;       // Max Concurrent Trades (Allows dip buying)
+input int      InpPendingOrderExpiryBars = 5;    // Pending Order Expiry (in Bars)
 
 input group "--- Compounding Settings ---"
 input bool     InpEnableCompounding = true;    // Enable Lot Compounding (scales target risk)
@@ -1168,14 +1169,19 @@ void CancelPendingOrdersEx(bool cancelLimits)
       {
          if(OrderGetString(ORDER_SYMBOL) == _Symbol && OrderGetInteger(ORDER_MAGIC) == InpMagicNumber)
          {
-            ENUM_ORDER_TYPE type = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
-            if(type == ORDER_TYPE_BUY_STOP || type == ORDER_TYPE_SELL_STOP)
+            datetime setupTime = (datetime)OrderGetInteger(ORDER_TIME_SETUP);
+            int barsPassed = iBarShift(_Symbol, _Period, setupTime);
+            if(barsPassed >= InpPendingOrderExpiryBars)
             {
-               trade.OrderDelete(ticket);
-            }
-            else if(cancelLimits && (type == ORDER_TYPE_BUY_LIMIT || type == ORDER_TYPE_SELL_LIMIT))
-            {
-               trade.OrderDelete(ticket);
+               ENUM_ORDER_TYPE type = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+               if(type == ORDER_TYPE_BUY_STOP || type == ORDER_TYPE_SELL_STOP)
+               {
+                  trade.OrderDelete(ticket);
+               }
+               else if(cancelLimits && (type == ORDER_TYPE_BUY_LIMIT || type == ORDER_TYPE_SELL_LIMIT))
+               {
+                  trade.OrderDelete(ticket);
+               }
             }
          }
       }
