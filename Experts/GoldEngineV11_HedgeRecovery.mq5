@@ -2571,6 +2571,60 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
    string h1Trend = (h1Ema > 0.0) ? ((prevClose > h1Ema) ? "BULLISH" : "BEARISH") : "UNKNOWN";
    string h4Trend = (h4Ema > 0.0) ? ((prevClose > h4Ema) ? "BULLISH" : "BEARISH") : "UNKNOWN";
    string mtfConfluenceDesc = StringFormat("Confluence: H1 EMA200 is %s, H4 EMA200 is %s.", h1Trend, h4Trend);
+   
+   string macroTrendDesc = "Mixed/Consolidating";
+   if(h1Trend == "BULLISH" && h4Trend == "BULLISH")
+      macroTrendDesc = "Strong Bullish (Price is above H1 and H4 EMA200)";
+   else if(h1Trend == "BEARISH" && h4Trend == "BEARISH")
+      macroTrendDesc = "Strong Bearish (Price is below H1 and H4 EMA200)";
+   else if(h1Trend == "BULLISH" && h4Trend == "BEARISH")
+      macroTrendDesc = "Mixed (Bullish pullback on H1 inside H4 Bearish Macro Trend)";
+   else if(h1Trend == "BEARISH" && h4Trend == "BULLISH")
+      macroTrendDesc = "Mixed (Bearish pullback on H1 inside H4 Bullish Macro Trend)";
+
+   // --- 1. Calculate Moving Average Slopes & Deviations (Momentum) ---
+   double qEma9Val[];
+   double qEma50Val[];
+   double qEma200Val[];
+   ArrayResize(qEma9Val, 2);
+   ArrayResize(qEma50Val, 2);
+   ArrayResize(qEma200Val, 2);
+   ArraySetAsSeries(qEma9Val, true);
+   ArraySetAsSeries(qEma50Val, true);
+   ArraySetAsSeries(qEma200Val, true);
+   
+   double e9Cur = 0.0, e9Prev = 0.0, e50Cur = 0.0, e50Prev = 0.0, e200Cur = 0.0, e200Prev = 0.0;
+   if(CopyBuffer(g_ema9Handle, 0, 1, 2, qEma9Val) > 0) { e9Cur = qEma9Val[0]; e9Prev = qEma9Val[1]; }
+   if(CopyBuffer(g_emaHandle, 0, 1, 2, qEma50Val) > 0) { e50Cur = qEma50Val[0]; e50Prev = qEma50Val[1]; }
+   if(CopyBuffer(g_ema200Handle, 0, 1, 2, qEma200Val) > 0) { e200Cur = qEma200Val[0]; e200Prev = qEma200Val[1]; }
+   
+   double e9Slope = (e9Cur > 0.0 && e9Prev > 0.0) ? (e9Cur - e9Prev) : 0.0;
+   double e50Slope = (e50Cur > 0.0 && e50Prev > 0.0) ? (e50Cur - e50Prev) : 0.0;
+   double e200Slope = (e200Cur > 0.0 && e200Prev > 0.0) ? (e200Cur - e200Prev) : 0.0;
+   
+   double e9Dev = (e9Cur > 0.0) ? (prevClose - e9Cur) : 0.0;
+   double e50Dev = (e50Cur > 0.0) ? (prevClose - e50Cur) : 0.0;
+   double e200Dev = (e200Cur > 0.0) ? (prevClose - e200Cur) : 0.0;
+
+   // --- 2. Calculate Proximity to Key Levels (Boundary Distances) ---
+   double tempCeiling = (ArraySize(nearestHighs) > 0) ? nearestHighs[0] : 0.0;
+   double tempFloor = (ArraySize(nearestLows) > 0) ? nearestLows[0] : 0.0;
+   
+   double distToCeiling = (tempCeiling > 0.0) ? (tempCeiling - prevClose) : 999.9;
+   double distToFloor = (tempFloor > 0.0) ? (prevClose - tempFloor) : 999.9;
+   double distToBullOB = (bullOB_High > 0.0) ? (prevClose - bullOB_High) : 999.9;
+   double distToBearOB = (bearOB_Low > 0.0) ? (bearOB_Low - prevClose) : 999.9;
+   
+   double distToFVG = 999.9;
+   if(fvgType == 1 && fvgHigh > 0.0)      distToFVG = prevClose - fvgHigh; 
+   else if(fvgType == -1 && fvgLow > 0.0)  distToFVG = fvgLow - prevClose;
+
+   string metricsDesc = StringFormat(
+      "EMA9 Slope: %.2f USD/bar, EMA50 Slope: %.2f USD/bar, EMA200 Slope: %.2f USD/bar. "+
+      "Price Deviation from EMA9: %.2f USD, EMA50: %.2f USD, EMA200: %.2f USD. "+
+      "USD Distance to GNN Golden Ceiling: %.2f, GNN Aqua Floor: %.2f, Nearest Bullish OB: %.2f, Nearest Bearish OB: %.2f, Nearest FVG: %.2f.",
+      e9Slope, e50Slope, e200Slope, e9Dev, e50Dev, e200Dev, distToCeiling, distToFloor, distToBullOB, distToBearOB, distToFVG
+   );
 
    datetime curTime = TimeCurrent();
    MqlDateTime sdt;
@@ -2590,8 +2644,9 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
 
    string prompt = StringFormat(
       "Gold (XAUUSD) setup analysis. Current price=%.2f. Active Session: %s. Account Capital: Balance=%.2f, Equity=%.2f, Free Margin=%.2f, Margin Level=%.1f%%. "+
-      "GNN Line Distances: %s. Technical Signals: Macro Trend is %s, Intraday VWAP is %s, RSI Status: %s, Spread Status: %s. "+
+      "GNN Line Distances: %s. Technical Signals: Intraday Trend (M5) is %s, Macro Trend (H1/H4) is %s, Intraday VWAP is %s, RSI Status: %s, Spread Status: %s. "+
       "Daily Range Analysis: %s. Multi-Timeframe Trend %s. Volatility opens: %s. "+
+        "Momentum & Proximity Metrics: %s. "+
       "Trend Direction: %s. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
       "Upcoming High-Impact News today: %s. "+
       "Price History (Active Timeframe): %s. "+
@@ -2601,13 +2656,17 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       "Untested Price Magnets (Liquidity Pools): %s. "+"ICT Market Structure (Order Blocks & Fair Value Gaps): %s. "+
       "As an Elite Discretionary Quant Trader, analyze the market context holistically. Do not act like a rigid indicator-matching script. Indicators are secondary confluence; your primary guidance is Raw Price Action, Market Structure, Wick Rejections, and Liquidity Sweeps. "+
       "Instructions: "+
-      "1. COGNITIVE NARRATIVE ANALYSIS: Read the 'story' of the chart. Identify if the current price is in 'No Man's Land' (the middle of the range). Entering a trade in the middle of a range is a fatal amateur error; you MUST wait for the price to reach key GNN boundaries where the risk-to-reward ratio is highly asymmetrical. "+
-      "2. LIQUIDITY SWEEP & WICK REJECTION: Institutional players run stop-losses below support floors (Aqua lines) and above resistance ceilings (Golden lines) to gather liquidity. You must anticipate these sweeps. Do not buy when price is falling aggressively toward support; instead, wait for a wick rejection showing buying pressure defending that floor, then enter. "+
-      "3. PATIENCE & DISCIPLINE: A master trader would rather miss a move than chase a bad entry. If the price has already run up, do not chase it. Chasing creates massive risk because your stop loss must still go below the structural floor. If you cannot get an entry with a risk-to-reward ratio of at least 1:2, you MUST issue a 'HOLD'. "+
+      "0. CHAIN-OF-THOUGHT ANALYSIS: Before making your decision, perform a strict step-by-step reasoning analysis. Compare the Intraday Trend (M5) slopes. If price deviation from EMA50 or EMA200 is greater than 2.0x ATR, analyze the high risk of a trend exhaustion or mean reversion. Look at the distance to the Golden Ceiling and Aqua Floor. If price is within 1.5x ATR of the Golden Ceiling, you must analyze why a BUY decision has an extremely poor risk-to-reward ratio and should be avoided. Compare this with higher timeframe Macro Trend (H1/H4) alignment. If they are conflicting (e.g. M5 is bullish but H1/H4 is bearish), you must prioritize the macro trend and look for SELL entries on M5 pullbacks or choose HOLD. Write this full analysis inside the 'reasoning' key first. "+
+      "1. INSTITUTIONAL MARKET STRUCTURE: Read the structural phase (Accumulation, Markup, Distribution, Markdown). Identify the dominant Order Flow. Identify key BOS (Break of Structure) and ChoCh (Change of Character). Trade in the direction of the dominant institutional flow. Never write 'Price in No Man's Land' or similar phrases as a reason for a HOLD decision. Always provide specific, detailed technical rationale based on trend confluence, EMA levels, VWAP, wicks, or Order Blocks. "+
+      "2. CONFLUENCE ENTRY ZONES: Seek convergence. Look for zones where GNN boundaries (Aqua/Golden lines) overlap with local Order Blocks (OB) or Fair Value Gaps (FVG). If a GNN support floor overlaps with a bullish OB/FVG, treat it as a high-conviction BUY zone. If a GNN resistance ceiling overlaps with a bullish OB/FVG, treat it as a high-conviction SELL zone. "+
+      "3. DECISIVE ENTRY & MOMENTUM: Do not over-analyze or hesitate. When you have a clear Daily Bias and price enters a confluence zone, execute immediately. Do not wait for perfect confirmation if it means missing the entry. Do not be afraid of momentum; place the trade and let your Stop Loss protect your capital. "+
       "4. STRATEGIC STOP LOSS PLACEMENT: Never place a Stop Loss right on a GNN line or key indicator value. Always place it 3 to 5 USD beyond the structural boundary (below the support floor or above the resistance ceiling) to survive normal market noise and wicks. If there is a support cluster (multiple Aqua lines within 5 to 8 USD of each other), treat the deepest line as the true structural floor and place your SL 3 to 5 USD below it. "+
       "5. SIDEWAYS PING-PONG PLAY: When you detect a tight sideways range, execute a SCALPING strategy with a SHORT_TERM horizon. Buy ONLY at the lower GNN boundary, target the upper boundary, and place your SL safely below the GNN support floor. Sell ONLY at the upper GNN boundary, target the lower boundary, and place your SL safely above the GNN resistance ceiling. "+
-      "6. CONVICTION & RISK CONTROLS: Raise your conviction threshold (issue 'HOLD') if recent trades show consecutive losses or if the account free margin is low. Prioritize capital preservation above all else. "+
+      "6. OBJECTIVE EXECUTION: Focus entirely on the technical setup at hand. Do not let recent closed losses or wins affect your decision-making. Trade every high-probability setup objectively and decisively without fear. The only way to recover drawdowns is to execute edge-congruent setups when your bias aligns. "+
+      "7. LONG-TERM SWING TRADES: When the daily/higher timeframe shows a clear macro trend (e.g. price consistently above or below EMA200), look for pullback entries to ride the trend. Set a 'LONG_TERM' horizon, target major support/resistance targets far away, and use a wider Stop Loss (placed beyond key structural lows/highs) to allow the swing trade room to breathe and generate large wins to recover drawdowns. "+
+      "8. BREAKOUT VALIDATION: Never buy a bullish breakout if ADX is below 20.0 (weak trend) or if RSI is above 70.0 (overbought). Never sell a bearish breakout if ADX is below 20.0 or if RSI is below 30.0 (oversold). In these low-momentum or extreme conditions, a breakout attempt is highly likely to fail and turn into a liquidity sweep reversal. You must choose HOLD or execute a REVERSION strategy instead. "+
       "Respond strictly with a JSON object containing: "+
+      "'reasoning' (detailed step-by-step analysis of EMAs, wicks, patterns, and liquidity gaps), "+
       "'decision' ('BUY', 'SELL', or 'HOLD'), "+
       "'conviction' (integer 0 to 100), "+
       "'regime' ('BREAKOUT' or 'REVERSION'), "+
@@ -2615,8 +2674,9 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       "'horizon' ('SHORT_TERM' or 'LONG_TERM'), "+
       "'stop_loss_price' (double target stop loss price level, or 0.0 to use default), "+
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
-      "'reason' (short 10 words explaining decision and why you adjusted based on recent trades).",
-      prevClose, activeSession, balance, equity, freeMargin, marginLevel, gnnDistanceDesc, maSignal, vwapSignal, rsiSignal, spreadSignal, dailyRangeDesc, mtfConfluenceDesc, sessionCountdownDesc,
+      "'reason' (short 10 words summary).",
+      prevClose, activeSession, balance, equity, freeMargin, marginLevel, gnnDistanceDesc, maSignal, macroTrendDesc, vwapSignal, rsiSignal, spreadSignal, dailyRangeDesc, mtfConfluenceDesc, sessionCountdownDesc,
+      metricsDesc,
       trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, candlePatterns, tradeHistory, magnetDesc, ictDesc
    );
 
@@ -2690,28 +2750,20 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       double goldCeiling = (ArraySize(nHighs) > 0) ? nHighs[0] : 0.0;
       double aquaFloor = (ArraySize(nLows) > 0) ? nLows[0] : 0.0;
       
-      bool isRangeStrategy = (g_aiStrategy == "MEAN_REVERSION" || g_aiStrategy == "SCALPING" || g_aiStrategy == "NONE" || g_aiStrategy == "");
-      
-      if(isRangeStrategy)
-      {
-         double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         
-         if(g_aiDecision == "BUY" && goldCeiling > 0.0 && currentAsk >= goldCeiling - 1.50)
-         {
-            PrintFormat("[Over-Extension Guard] BUY blocked. Price %.2f is too close to Golden Line Ceiling: %.2f for range strategy: %s", currentAsk, goldCeiling, g_aiStrategy);
-            g_aiDecision = "BLOCKED";
-            DrawChartStatus(currentADX, currentATR, (rawRegime == "REVERSION"));
-            return false;
-         }
-         else if(g_aiDecision == "SELL" && aquaFloor > 0.0 && currentBid <= aquaFloor + 1.50)
-         {
-            PrintFormat("[Over-Extension Guard] SELL blocked. Price %.2f is too close to Aqua Line Floor: %.2f for range strategy: %s", currentBid, aquaFloor, g_aiStrategy);
-            g_aiDecision = "BLOCKED";
-            DrawChartStatus(currentADX, currentATR, (rawRegime == "REVERSION"));
-            return false;
-         }
-      }
+             double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+       double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+       
+       // Dynamic guard distance based on ATR (minimum 3.0 USD buffer to protect from near-boundary whipsaws)
+       double guardDist = MathMax(3.0, 1.5 * currentATR);
+       
+       if(g_aiDecision == "BUY" && goldCeiling > 0.0 && currentAsk >= goldCeiling - guardDist)
+       {
+          PrintFormat("[Over-Extension Warning] BUY price %.2f is close to Golden Line Ceiling: %.2f (Guard buffer: %.2f). LLM is proceeding with supreme control.", currentAsk, goldCeiling, guardDist);
+       }
+       else if(g_aiDecision == "SELL" && aquaFloor > 0.0 && currentBid <= aquaFloor + guardDist)
+       {
+          PrintFormat("[Over-Extension Warning] SELL price %.2f is close to Aqua Line Floor: %.2f (Guard buffer: %.2f). LLM is proceeding with supreme control.", currentBid, aquaFloor, guardDist);
+       }
 
       // Block trades below the threshold
       if(g_aiConviction < InpMinConviction)
