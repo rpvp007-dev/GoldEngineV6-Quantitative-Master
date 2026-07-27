@@ -323,6 +323,10 @@ string         g_aiStrategy = "NONE";
 string         g_tradeHorizon = "SHORT_TERM"; // SHORT_TERM or LONG_TERM holding time horizon
 string         g_aiRegime = "BREAKOUT";     // Holds current active AI regime
 string         g_upcomingNews = "None"; // Holds parsed news for the current day
+string         g_h1MacroBias = "NEUTRAL";
+string         g_h1MacroReason = "Analyzing macro H1...";
+datetime       g_lastH1BarTime = 0;
+string         g_lastAIResponseText = "";
 datetime       g_lastCalendarFetchTime = 0; // Tracks when we last fetched calendar
 
 //+------------------------------------------------------------------+
@@ -1500,6 +1504,310 @@ bool QueryGroqDirect(string prompt, string &responseText)
    return false;
 }
 
+string GetNewsCountdownDesc()
+{
+   if(g_upcomingNews == "None" || g_upcomingNews == "") return "No high-impact news today.";
+   
+   datetime gmt = TimeGMT();
+   MqlDateTime gmtStruct;
+   TimeToStruct(gmt, gmtStruct);
+   
+   int estOffset = -5; // default EST
+   // US DST: Second Sunday of March to First Sunday of November
+   if(gmtStruct.mon > 3 && gmtStruct.mon < 11) estOffset = -4;
+   else if(gmtStruct.mon == 3)
+   {
+      if(gmtStruct.day - gmtStruct.day_of_week >= 8) estOffset = -4;
+   }
+   else if(gmtStruct.mon == 11)
+   {
+      if(gmtStruct.day - gmtStruct.day_of_week < 1) estOffset = -4;
+   }
+   
+   datetime est = gmt + estOffset * 3600;
+   MqlDateTime estStruct;
+   TimeToStruct(est, estStruct);
+   int curMins = estStruct.hour * 60 + estStruct.min;
+   
+   string desc = "";
+   int startPos = 0;
+   
+   while(startPos < StringLen(g_upcomingNews))
+   {
+      int atIdx = StringFind(g_upcomingNews, " at ", startPos);
+      if(atIdx < 0) break;
+      
+      int nameStart = startPos;
+      while(nameStart < atIdx && (StringSubstr(g_upcomingNews, nameStart, 1) == "," || StringSubstr(g_upcomingNews, nameStart, 1) == " "))
+         nameStart++;
+      string newsName = StringSubstr(g_upcomingNews, nameStart, atIdx - nameStart);
+      
+      int timeStart = atIdx + 4;
+      int spaceIdx = StringFind(g_upcomingNews, " (", timeStart);
+      if(spaceIdx < 0) break;
+      
+      string timeStr = StringSubstr(g_upcomingNews, timeStart, spaceIdx - timeStart);
+      
+      int colonIdx = StringFind(timeStr, ":");
+      if(colonIdx > 0)
+      {
+         int hour = (int)StringToInteger(StringSubstr(timeStr, 0, colonIdx));
+         int min = (int)StringToInteger(StringSubstr(timeStr, colonIdx + 1, 2));
+         bool isPM = (StringFind(timeStr, "pm") >= 0);
+         bool isAM = (StringFind(timeStr, "am") >= 0);
+         
+         if(isPM && hour != 12) hour += 12;
+         if(isAM && hour == 12) hour = 0;
+         
+         int newsMins = hour * 60 + min;
+         int diff = newsMins - curMins;
+         
+         if(desc != "") desc += ", ";
+         if(diff > 0)
+         {
+            desc += StringFormat("%s in %d mins", newsName, diff);
+         }
+         else if(diff >= -30)
+         {
+            desc += StringFormat("%s occurred %d mins ago (Active Volatility)", newsName, -diff);
+         }
+         else
+         {
+            desc += StringFormat("%s passed", newsName);
+         }
+      }
+      else
+      {
+         if(desc != "") desc += ", ";
+         desc += StringFormat("%s (%s)", newsName, timeStr);
+      }
+      
+      int closeBrack = StringFind(g_upcomingNews, ")", spaceIdx);
+      if(closeBrack < 0) break;
+      startPos = closeBrack + 1;
+   }
+   
+   if(desc == "") return "No specific timed news today.";
+   return desc;
+}
+
+void CalculateDailyVolumeProfile(double &poc, double &vah, double &val, double &imbalanceRatio)
+{
+   poc = 0.0; vah = 0.0; val = 0.0; imbalanceRatio = 1.0;
+   datetime startOfDay = iTime(_Symbol, PERIOD_D1, 0);
+   if(startOfDay <= 0) return;
+   
+   MqlRates rates[];
+   ArraySetAsSeries(rates, false);
+   int copied = CopyRates(_Symbol, PERIOD_M5, startOfDay, TimeCurrent(), rates);
+   if(copied <= 0) return;
+   
+   double minPrice = 999999.0;
+   double maxPrice = 0.0;
+   for(int i = 0; i < copied; i++)
+   {
+      if(rates[i].low < minPrice) minPrice = rates[i].low;
+      if(rates[i].high > maxPrice) maxPrice = rates[i].high;
+   }
+   
+   int numBuckets = (int)MathCeil(maxPrice - minPrice);
+   if(numBuckets <= 0) numBuckets = 1;
+   double bucketSize = 1.0;
+   if(numBuckets > 100)
+   {
+      bucketSize = MathCeil((maxPrice - minPrice) / 50.0);
+      numBuckets = (int)MathCeil((maxPrice - minPrice) / bucketSize);
+      if(numBuckets <= 0) numBuckets = 1;
+   }
+   
+   double volumes[];
+   ArrayResize(volumes, numBuckets);
+   ArrayInitialize(volumes, 0.0);
+   
+   double totalVolume = 0.0;
+   double totalBullVolume = 0.0;
+   double totalBearVolume = 0.0;
+   for(int i = 0; i < copied; i++)
+   {
+      int bucketIdx = (int)((rates[i].close - minPrice) / bucketSize);
+      if(bucketIdx >= 0 && bucketIdx < numBuckets)
+      {
+         volumes[bucketIdx] += (double)rates[i].tick_volume;
+         totalVolume += (double)rates[i].tick_volume;
+      }
+      if(rates[i].close > rates[i].open)
+         totalBullVolume += (double)rates[i].tick_volume;
+      else if(rates[i].close < rates[i].open)
+         totalBearVolume += (double)rates[i].tick_volume;
+   }
+   
+   double maxVol = 0.0;
+   int pocIdx = 0;
+   for(int i = 0; i < numBuckets; i++)
+   {
+      if(volumes[i] > maxVol)
+      {
+         maxVol = volumes[i];
+         pocIdx = i;
+      }
+   }
+   poc = minPrice + pocIdx * bucketSize + (bucketSize / 2.0);
+   
+   double targetVol = totalVolume * 0.70;
+   double currentVol = maxVol;
+   int lowerIdx = pocIdx;
+   int upperIdx = pocIdx;
+   
+   while(currentVol < targetVol && (lowerIdx > 0 || upperIdx < numBuckets - 1))
+   {
+      double leftVol = (lowerIdx > 0) ? volumes[lowerIdx - 1] : 0.0;
+      double rightVol = (upperIdx < numBuckets - 1) ? volumes[upperIdx + 1] : 0.0;
+      
+      if(leftVol >= rightVol && lowerIdx > 0)
+      {
+         lowerIdx--;
+         currentVol += leftVol;
+      }
+      else if(upperIdx < numBuckets - 1)
+      {
+         upperIdx++;
+         currentVol += rightVol;
+      }
+      else if(lowerIdx > 0)
+      {
+         lowerIdx--;
+         currentVol += leftVol;
+      }
+      else
+      {
+         break;
+      }
+   }
+   val = minPrice + lowerIdx * bucketSize;
+   vah = minPrice + upperIdx * bucketSize + bucketSize;
+   imbalanceRatio = (totalBearVolume > 0.0) ? (totalBullVolume / totalBearVolume) : 1.0;
+}
+
+bool QueryAIH1MacroBias()
+{
+   string h1History = "";
+   for(int i = 10; i >= 1; i--)
+   {
+      h1History += StringFormat("[H1 Bar %d: O=%.2f, H=%.2f, L=%.2f, C=%.2f, V=%I64d] ", 
+         i, iOpen(_Symbol, PERIOD_H1, i), iHigh(_Symbol, PERIOD_H1, i), iLow(_Symbol, PERIOD_H1, i), iClose(_Symbol, PERIOD_H1, i), iVolume(_Symbol, PERIOD_H1, i));
+   }
+   
+   double currentEMA200 = 0.0;
+   int handleH1EMA200 = iMA(_Symbol, PERIOD_H1, 200, 0, MODE_EMA, PRICE_CLOSE);
+   if(handleH1EMA200 != INVALID_HANDLE)
+   {
+      double emaArr[];
+      if(CopyBuffer(handleH1EMA200, 0, 0, 1, emaArr) > 0) currentEMA200 = emaArr[0];
+      IndicatorRelease(handleH1EMA200);
+   }
+   
+   double h1Close = iClose(_Symbol, PERIOD_H1, 0);
+   string h1Trend = (h1Close > currentEMA200) ? "BULLISH (above EMA200)" : "BEARISH (below EMA200)";
+   
+   string prompt = StringFormat(
+      "Gold (XAUUSD) H1 Macro Strategist Analysis in json format. Current price=%.2f. H1 Trend: %s (H1 EMA200=%.2f). H1 candles history: %s. "+
+      "As an Elite Macro Strategist, analyze the higher timeframe structure, volume shift, and major support/resistance. "+
+      "Determine the H1 directional bias for the next few hours. "+
+      "Respond strictly with a json object containing: 'bias' ('BULLISH', 'BEARISH', or 'NEUTRAL') and 'reason' (short 10 words summary). "+
+      "Example: { \"bias\": \"BULLISH\", \"reason\": \"Double bottom rejection on H1 support\" }.",
+      SymbolInfoDouble(_Symbol, SYMBOL_BID), h1Trend, currentEMA200, h1History
+   );
+   
+   string responseText = "";
+   if(!CallAI(prompt, responseText))
+   {
+      g_h1MacroBias = "NEUTRAL";
+      g_h1MacroReason = "AI Macro offline, neutral fallback.";
+      return false;
+   }
+   
+   int biasIdx = StringFind(responseText, "\"bias\"");
+   if(biasIdx >= 0)
+   {
+      if(StringFind(responseText, "BULLISH", biasIdx) >= 0) g_h1MacroBias = "BULLISH";
+      else if(StringFind(responseText, "BEARISH", biasIdx) >= 0) g_h1MacroBias = "BEARISH";
+      else g_h1MacroBias = "NEUTRAL";
+   }
+   else
+   {
+      g_h1MacroBias = "NEUTRAL";
+   }
+   
+   int reasonIdx = StringFind(responseText, "\"reason\"");
+   if(reasonIdx >= 0)
+   {
+      int valStart = StringFind(responseText, "\"", reasonIdx + 8);
+      if(valStart >= 0)
+      {
+         int valEnd = StringFind(responseText, "\"", valStart + 1);
+         if(valEnd >= 0)
+         {
+            g_h1MacroReason = StringSubstr(responseText, valStart + 1, valEnd - valStart - 1);
+         }
+      }
+   }
+   
+   PrintFormat("[H1 Macro Strategist Success] Bias: %s, Reason: %s", g_h1MacroBias, g_h1MacroReason);
+   return true;
+}
+
+void SaveReasoningForNewPosition(string responseText)
+{
+   if(responseText == "") return;
+   
+   string strategy = ExtractJSONValue(responseText, "strategy");
+   string reasoning = ExtractJSONValue(responseText, "reasoning");
+   if(strategy == "" && reasoning == "") return;
+   
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
+      {
+         ulong positionId = PositionGetInteger(POSITION_IDENTIFIER);
+         string fileName = StringFormat("GoldEngine_Reasoning_%I64u.txt", positionId);
+         if(!FileIsExist(fileName))
+         {
+            int fileHandle = FileOpen(fileName, FILE_WRITE|FILE_TXT|FILE_ANSI);
+            if(fileHandle != INVALID_HANDLE)
+            {
+               FileWriteString(fileHandle, StringFormat("%s|%s", strategy, reasoning));
+               FileClose(fileHandle);
+               PrintFormat("[Post-Mortem Memory] Saved reasoning file for position ID: %I64u", positionId);
+            }
+            break;
+         }
+      }
+   }
+   
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = OrderGetTicket(i);
+      if(ticket > 0)
+      {
+         if(OrderGetString(ORDER_SYMBOL) == _Symbol && OrderGetInteger(ORDER_MAGIC) == InpMagicNumber)
+         {
+            string fileName = StringFormat("GoldEngine_Reasoning_Order_%I64u.txt", ticket);
+            if(!FileIsExist(fileName))
+            {
+               int fileHandle = FileOpen(fileName, FILE_WRITE|FILE_TXT|FILE_ANSI);
+               if(fileHandle != INVALID_HANDLE)
+               {
+                  FileWriteString(fileHandle, StringFormat("%s|%s", strategy, reasoning));
+                  FileClose(fileHandle);
+                  PrintFormat("[Post-Mortem Memory] Saved reasoning file for pending order ticket: %I64u", ticket);
+               }
+               break;
+            }
+         }
+      }
+   }
+}
+
 bool CallAI(string prompt, string &responseText)
 {
    // --- Option 1: Groq Only ---
@@ -1944,16 +2252,37 @@ void GetRecentTradesHistory(string &historyStr)
             string typeStr = (entryType == DEAL_TYPE_BUY) ? "BUY" : "SELL";
             string comment = HistoryDealGetString(ticket, DEAL_COMMENT);
             
-            historyStr += StringFormat("[Trade %d: %s entry %.2f, exit %.2f, profit=%.2f$, comment='%s'] ", 
-               count + 1, typeStr, entryPrice, price, profit, comment);
+            string savedStrategy = "N/A";
+            string savedReasoning = "N/A";
+            string fileName = StringFormat("GoldEngine_Reasoning_%I64u.txt", positionId);
+            string pendingFileName = StringFormat("GoldEngine_Reasoning_Order_%I64u.txt", positionId);
+            
+            string fileToRead = "";
+            if(FileIsExist(fileName)) fileToRead = fileName;
+            else if(FileIsExist(pendingFileName)) fileToRead = pendingFileName;
+            
+            if(fileToRead != "")
+            {
+               int fileHandle = FileOpen(fileToRead, FILE_READ|FILE_TXT|FILE_ANSI);
+               if(fileHandle != INVALID_HANDLE)
+               {
+                  string savedContent = FileReadString(fileHandle);
+                  FileClose(fileHandle);
+                  
+                  int pipeIdx = StringFind(savedContent, "|");
+                  if(pipeIdx >= 0)
+                  {
+                     savedStrategy = StringSubstr(savedContent, 0, pipeIdx);
+                     savedReasoning = StringSubstr(savedContent, pipeIdx + 1);
+                  }
+               }
+            }
+            
+            historyStr += StringFormat("[Trade %d: %s entry %.2f, exit %.2f, profit=%.2f$, strategy=%s, reasoning='%s', comment='%s'] ", 
+               count + 1, typeStr, entryPrice, price, profit, savedStrategy, savedReasoning, comment);
             count++;
          }
       }
-   }
-   
-   if(historyStr == "")
-   {
-      historyStr = "No recent closed trades under this magic number.";
    }
 }
 
@@ -2611,11 +2940,18 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
    if(minsToNY > 0) sessionCountdownDesc += StringFormat("NY Open in %d mins. ", minsToNY);
    else sessionCountdownDesc += "NY is open. ";
 
+   double g_dailyPOC = 0.0;
+   double g_dailyVAH = 0.0;
+   double g_dailyVAL = 0.0;
+   double g_dailyImbalance = 1.0;
+   CalculateDailyVolumeProfile(g_dailyPOC, g_dailyVAH, g_dailyVAL, g_dailyImbalance);
+   string newsCountdownDesc = GetNewsCountdownDesc();
+
    string prompt = StringFormat(
       "Gold (XAUUSD) setup analysis. Current price=%.2f. Active Session: %s. Account Capital: Balance=%.2f, Equity=%.2f, Free Margin=%.2f, Margin Level=%.1f%%. "+
-      "GNN Line Distances: %s. Technical Signals: Intraday Trend (M5) is %s, Macro Trend (H1/H4) is %s, Intraday VWAP is %s, RSI Status: %s, Spread Status: %s. "+
+      "GNN Line Distances: %s. Technical Signals: Intraday Trend (M5) is %s, Macro H1 Bias: %s (Reason: %s), Macro Trend (H1/H4) is %s, Intraday VWAP is %s, RSI Status: %s, Spread Status: %s. "+
       "Daily Range Analysis: %s. Multi-Timeframe Trend %s. Volatility opens: %s. "+
-        "Momentum & Proximity Metrics: %s. "+
+      "Momentum & Proximity Metrics: %s. Intraday Volume Profile: POC=%.2f, VAH=%.2f, VAL=%.2f, Imbalance Ratio=%.2f. High-Impact News Countdowns: %s. "+
       "Trend Direction: %s. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
       "Upcoming High-Impact News today: %s. "+
       "Price History (Active Timeframe): %s. "+
@@ -2625,7 +2961,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       "Untested Price Magnets (Liquidity Pools): %s. "+"ICT Market Structure (Order Blocks & Fair Value Gaps): %s. "+
       "As an Elite Discretionary Quant Trader, analyze the market context holistically. Do not act like a rigid indicator-matching script. Indicators are secondary confluence; your primary guidance is Raw Price Action, Market Structure, Wick Rejections, and Liquidity Sweeps. "+
       "Instructions: "+
-      "0. CHAIN-OF-THOUGHT ANALYSIS: Before making your decision, perform a strict step-by-step reasoning analysis. Compare the Intraday Trend (M5) slopes. If price deviation from EMA50 or EMA200 is greater than 2.0x ATR, analyze the high risk of a trend exhaustion or mean reversion. Look at the distance to the Golden Ceiling and Aqua Floor. If price is within 1.5x ATR of the Golden Ceiling, you must analyze why a BUY decision has an extremely poor risk-to-reward ratio and should be avoided. Compare this with higher timeframe Macro Trend (H1/H4) alignment. If they are conflicting (e.g. M5 is bullish but H1/H4 is bearish), you must prioritize the macro trend and look for SELL entries on M5 pullbacks or choose HOLD. Write this full analysis inside the 'reasoning' key first. "+
+      "0. CHAIN-OF-THOUGHT ANALYSIS: Before making your decision, perform a strict step-by-step reasoning analysis. 1. Compare the price location to the Intraday Volume Profile (POC, VAH, VAL, and volume imbalance). 2. Check the exact time remaining for high-impact news releases to avoid entering high-volatility spikes. 3. Look at the outcome and comments of recent closed trades. 4. Analyze price deviation from EMAs and distance to Golden/Aqua boundaries to calculate the risk-to-reward ratio. If they are conflicting with Macro H1 Bias, prioritize H1 bias or choose HOLD. Write this full analysis inside the 'reasoning' key first. "+
       "1. INSTITUTIONAL MARKET STRUCTURE: Read the structural phase (Accumulation, Markup, Distribution, Markdown). Identify the dominant Order Flow. Identify key BOS (Break of Structure) and ChoCh (Change of Character). Trade in the direction of the dominant institutional flow. Never write 'Price in No Man's Land' or similar phrases as a reason for a HOLD decision. Always provide specific, detailed technical rationale based on trend confluence, EMA levels, VWAP, wicks, or Order Blocks. "+
       "2. CONFLUENCE ENTRY ZONES: Seek convergence. Look for zones where GNN boundaries (Aqua/Golden lines) overlap with local Order Blocks (OB) or Fair Value Gaps (FVG). If a GNN support floor overlaps with a bullish OB/FVG, treat it as a high-conviction BUY zone. If a GNN resistance ceiling overlaps with a bullish OB/FVG, treat it as a high-conviction SELL zone. "+
       "3. DECISIVE ENTRY & MOMENTUM: Do not over-analyze or hesitate. When you have a clear Daily Bias and price enters a confluence zone, execute immediately. Do not wait for perfect confirmation if it means missing the entry. Do not be afraid of momentum; place the trade and let your Stop Loss protect your capital. "+
@@ -2644,8 +2980,8 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       "'stop_loss_price' (double target stop loss price level, or 0.0 to use default), "+
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words summary).",
-      prevClose, activeSession, balance, equity, freeMargin, marginLevel, gnnDistanceDesc, maSignal, macroTrendDesc, vwapSignal, rsiSignal, spreadSignal, dailyRangeDesc, mtfConfluenceDesc, sessionCountdownDesc,
-      metricsDesc,
+      prevClose, activeSession, balance, equity, freeMargin, marginLevel, gnnDistanceDesc, maSignal, g_h1MacroBias, g_h1MacroReason, macroTrendDesc, vwapSignal, rsiSignal, spreadSignal, dailyRangeDesc, mtfConfluenceDesc, sessionCountdownDesc,
+      metricsDesc, g_dailyPOC, g_dailyVAH, g_dailyVAL, g_dailyImbalance, newsCountdownDesc,
       trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, candlePatterns, tradeHistory, magnetDesc, ictDesc
    );
 
@@ -2658,6 +2994,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       aiActive = CallAI(prompt, responseText);
       if(aiActive)
       {
+         g_lastAIResponseText = responseText;
          string rawDecision = ExtractJSONValue(responseText, "decision");
          string rawConviction = ExtractJSONValue(responseText, "conviction");
          string rawReason = ExtractJSONValue(responseText, "reason");
@@ -3626,6 +3963,8 @@ int OnInit()
    // 5. Fetch Economic Calendar and establish initial Daily Sentiment Anchor
    FetchEconomicCalendar();
    QueryAIDailySentiment();
+   g_lastH1BarTime = iTime(_Symbol, PERIOD_H1, 0);
+   QueryAIH1MacroBias();
    
    MqlDateTime dt;
    TimeCurrent(dt);
@@ -3984,7 +4323,10 @@ void CheckMidCandleTriggers(datetime currentBarTime)
       g_midCandleQueried = true;
       g_lastAICallTime = TimeCurrent();
       PrintFormat("[Mid-Candle Trigger] Event: %s. Querying AI Brain mid-candle...", triggerReason);
-      ExecuteNewOrderPlacement(currentBarTime, true);
+      if(ExecuteNewOrderPlacement(currentBarTime, true))
+      {
+         SaveReasoningForNewPosition(g_lastAIResponseText);
+      }
    }
 }
 
@@ -4148,6 +4490,15 @@ void OnTick()
          g_lastDay = dt.day;
          FetchEconomicCalendar();
          QueryAIDailySentiment();
+         g_lastH1BarTime = iTime(_Symbol, PERIOD_H1, 0);
+         QueryAIH1MacroBias();
+      }
+      
+      datetime h1BarTime = iTime(_Symbol, PERIOD_H1, 0);
+      if(h1BarTime != g_lastH1BarTime)
+      {
+         g_lastH1BarTime = h1BarTime;
+         QueryAIH1MacroBias();
       }
       
       bool isMomentumHour = false;
@@ -4245,7 +4596,10 @@ void OnTick()
    {
       if(CountActiveTrades() < InpMaxConcurrentTrades)
       {
-         ExecuteNewOrderPlacement(currentBarTime);
+         if(ExecuteNewOrderPlacement(currentBarTime))
+         {
+            SaveReasoningForNewPosition(g_lastAIResponseText);
+         }
       }
    }
    
