@@ -1426,13 +1426,22 @@ bool QueryGeminiDirect(string prompt, string &responseText)
    return false;
 }
 
+string EscapeJSONString(string text)
+{
+   string escaped = text;
+   StringReplace(escaped, "\\", "\\\\");
+   StringReplace(escaped, "\"", "\\\"");
+   StringReplace(escaped, "\r", "\\r");
+   StringReplace(escaped, "\n", "\\n");
+   StringReplace(escaped, "\t", "\\t");
+   return escaped;
+}
+
 bool QueryOpenRouterDirect(string prompt, string &responseText)
 {
    if(g_openRouterAPIKey == "" || g_openRouterAPIKey == "PASTE_YOUR_API_KEY_HERE") return false;
    
-   string cleanPrompt = prompt;
-   StringReplace(cleanPrompt, "\"", "\\\"");
-   
+   string cleanPrompt = EscapeJSONString(prompt);   
    string requestBody = "";
    if(InpUseAIVision)
    {
@@ -1512,9 +1521,7 @@ bool QueryGroqDirect(string prompt, string &responseText)
 {
    if(g_groqAPIKey == "" || g_groqAPIKey == "PASTE_YOUR_API_KEY_HERE") return false;
    
-   string cleanPrompt = prompt;
-   StringReplace(cleanPrompt, "\"", "\\\"");
-   string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + cleanPrompt + "\"}],\"temperature\":0.2,\"response_format\":{\"type\":\"json_object\"}}";
+   string cleanPrompt = EscapeJSONString(prompt);   string requestBody = "{\"model\":\"llama-3.1-8b-instant\",\"messages\":[{\"role\":\"user\",\"content\":\"" + cleanPrompt + "\"}],\"temperature\":0.2,\"response_format\":{\"type\":\"json_object\"}}";
    string url = "https://api.groq.com/openai/v1/chat/completions";
    string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpGroqAPIKey + "\r\n";
    
@@ -1762,30 +1769,27 @@ bool QueryAIH1MacroBias()
       return false;
    }
    
-   int biasIdx = StringFind(responseText, "\"bias\"");
-   if(biasIdx >= 0)
+      string bias = ExtractJSONValue(responseText, "bias");
+   string reason = ExtractJSONValue(responseText, "reason");
+   
+   StringToUpper(bias);
+   StringTrimLeft(bias);
+   StringTrimRight(bias);
+   
+   if(bias == "BULLISH" || bias == "BEARISH" || bias == "NEUTRAL")
    {
-      if(StringFind(responseText, "BULLISH", biasIdx) >= 0) g_h1MacroBias = "BULLISH";
-      else if(StringFind(responseText, "BEARISH", biasIdx) >= 0) g_h1MacroBias = "BEARISH";
-      else g_h1MacroBias = "NEUTRAL";
+      g_h1MacroBias = bias;
    }
    else
    {
       g_h1MacroBias = "NEUTRAL";
    }
    
-   int reasonIdx = StringFind(responseText, "\"reason\"");
-   if(reasonIdx >= 0)
+   if(reason != "")
    {
-      int valStart = StringFind(responseText, "\"", reasonIdx + 8);
-      if(valStart >= 0)
-      {
-         int valEnd = StringFind(responseText, "\"", valStart + 1);
-         if(valEnd >= 0)
-         {
-            g_h1MacroReason = StringSubstr(responseText, valStart + 1, valEnd - valStart - 1);
-         }
-      }
+      g_h1MacroReason = reason;
+      StringTrimLeft(g_h1MacroReason);
+      StringTrimRight(g_h1MacroReason);
    }
    
    PrintFormat("[H1 Macro Strategist Success] Bias: %s, Reason: %s", g_h1MacroBias, g_h1MacroReason);
