@@ -1907,6 +1907,73 @@ string GetMTFStructureAlignment()
    return StringFormat("[M5: %s, M15: %s, H1: %s]", m5Structure, m15Structure, h1Structure);
 }
 
+void GetAsianSessionRange(double &asianHigh, double &asianLow)
+{
+   asianHigh = 0.0;
+   asianLow = 999999.0;
+   
+   datetime currentDayOpen = iTime(_Symbol, PERIOD_D1, 0);
+   if(currentDayOpen <= 0) return;
+   
+   MqlRates rates[];
+   ArraySetAsSeries(rates, false);
+   int copied = CopyRates(_Symbol, PERIOD_M5, currentDayOpen, TimeCurrent(), rates);
+   if(copied <= 0) return;
+   
+   bool found = false;
+   for(int i = 0; i < copied; i++)
+   {
+      MqlDateTime dt;
+      TimeToStruct(rates[i].time, dt);
+      if(dt.hour >= 0 && dt.hour < 8)
+      {
+         if(rates[i].high > asianHigh) asianHigh = rates[i].high;
+         if(rates[i].low < asianLow) asianLow = rates[i].low;
+         found = true;
+      }
+   }
+   
+   if(!found) { asianHigh = 0.0; asianLow = 0.0; }
+}
+
+void GetAccountRiskExposure(double &floatingPnL, double &totalRiskUSD)
+{
+   floatingPnL = 0.0;
+   totalRiskUSD = 0.0;
+   
+   double contractSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(contractSize <= 0.0 || tickSize <= 0.0) return;
+   
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
+      {
+         double profit = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_COMMISSION) + PositionGetDouble(POSITION_SWAP);
+         floatingPnL += profit;
+         
+         double sl = PositionGetDouble(POSITION_SL);
+         double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+         long type = PositionGetInteger(POSITION_TYPE);
+         double volume = PositionGetDouble(POSITION_VOLUME);
+         
+         if(sl > 0.0)
+         {
+            double diff = 0.0;
+            if(type == POSITION_TYPE_BUY) diff = entry - sl;
+            else if(type == POSITION_TYPE_SELL) diff = sl - entry;
+            
+            if(diff > 0.0)
+            {
+               double risk = (diff / tickSize) * volume * tickValue;
+               totalRiskUSD += risk;
+            }
+         }
+      }
+   }
+}
+
 bool CallAI(string prompt, string &responseText)
 {
    // --- Option 1: Groq Only ---
@@ -3124,11 +3191,24 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       else if(ratio > 1.5) volRegimeDesc = StringFormat("Volatility Expansion (Ratio=%.2f, ATR=%.2f, SMA=%.2f) - high momentum breakouts expected", ratio, currentATRVal, atrSMA);
       else volRegimeDesc = StringFormat("Normal Volatility (Ratio=%.2f, ATR=%.2f, SMA=%.2f)", ratio, currentATRVal, atrSMA);
    }
+   
+   double asianHigh = 0.0, asianLow = 0.0;
+   GetAsianSessionRange(asianHigh, asianLow);
+   string asianRangeDesc = StringFormat("High=%.2f, Low=%.2f", asianHigh, asianLow);
+   
+   MqlDateTime brokerTimeStruct;
+   TimeCurrent(brokerTimeStruct);
+   string dayNames[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+   string timeDayDesc = StringFormat("%s at %02d:%02d", dayNames[brokerTimeStruct.day_of_week], brokerTimeStruct.hour, brokerTimeStruct.min);
+   
+   double floatingPnL = 0.0, totalRiskUSD = 0.0;
+   GetAccountRiskExposure(floatingPnL, totalRiskUSD);
+   string riskExposureDesc = StringFormat("Floating PnL=%.2f$, Active Risk Exposure to SL=%.2f$", floatingPnL, totalRiskUSD);
 
-      string prompt = StringFormat(
-      "Gold (XAUUSD) setup analysis. Current price=%.2f. Active Session: %s. Account Capital: Balance=%.2f, Equity=%.2f, Free Margin=%.2f, Margin Level=%.1f%%. "+
+   string prompt = StringFormat(
+      "Gold (XAUUSD) setup analysis. Current price=%.2f. Active Session: %s (Time: %s). Account Capital: Balance=%.2f, Equity=%.2f, Free Margin=%.2f, Margin Level=%.1f%%. Open Positions Exposure: %s. "+
       "GNN Line Distances: %s. Technical Signals: Intraday Trend (M5) is %s, Macro H1 Bias: %s (Reason: %s), Macro Trend (H1/H4) is %s, Intraday VWAP is %s, RSI Status: %s, Spread Status: %s. "+
-      "Daily Range Analysis: %s. Volatility Regime State: %s. Multi-Timeframe Trend %s. Multi-Timeframe Structure Map: %s. Volatility opens: %s. "+
+      "Daily Range Analysis: %s. Asian Session Range: %s. Volatility Regime State: %s. Multi-Timeframe Trend %s. Multi-Timeframe Structure Map: %s. Volatility opens: %s. "+
       "Momentum & Proximity Metrics: %s. Intraday Volume Profile: POC=%.2f, VAH=%.2f, VAL=%.2f, Imbalance Ratio=%.2f. High-Impact News Countdowns: %s. "+
       "Trend Direction: %s. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
       "Upcoming High-Impact News today: %s. "+
@@ -3175,7 +3255,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       "'stop_loss_price' (double target stop loss price level, or 0.0 to use default), "+
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words summary).",
-      prevClose, activeSession, balance, equity, freeMargin, marginLevel, gnnDistanceDesc, maSignal, g_h1MacroBias, g_h1MacroReason, macroTrendDesc, vwapSignal, rsiSignal, spreadSignal, dailyRangeDesc, volRegimeDesc, mtfConfluenceDesc, mtfStructureMap, sessionCountdownDesc,
+      prevClose, activeSession, timeDayDesc, balance, equity, freeMargin, marginLevel, riskExposureDesc, gnnDistanceDesc, maSignal, g_h1MacroBias, g_h1MacroReason, macroTrendDesc, vwapSignal, rsiSignal, spreadSignal, dailyRangeDesc, asianRangeDesc, volRegimeDesc, mtfConfluenceDesc, mtfStructureMap, sessionCountdownDesc,
       metricsDesc, g_dailyPOC, g_dailyVAH, g_dailyVAL, g_dailyImbalance, newsCountdownDesc,
       trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, candlePatterns, tradeHistory, magnetDesc, ictDesc
    );
