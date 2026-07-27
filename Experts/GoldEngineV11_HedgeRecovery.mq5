@@ -1408,7 +1408,8 @@ bool QueryGeminiDirect(string prompt, string &responseText)
    uchar result[];
    string responseHeaders = "";
    int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
-   if(bytes > 0 && post[bytes-1] == 0) ArrayResize(post, bytes - 1);
+   while(bytes > 0 && post[bytes-1] == 0) { bytes--; }
+   ArrayResize(post, bytes);
    
    ResetLastError();
    int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
@@ -1429,6 +1430,7 @@ bool QueryGeminiDirect(string prompt, string &responseText)
 string EscapeJSONString(string text)
 {
    string escaped = text;
+   StringReplace(escaped, "\\x00", "");
    StringReplace(escaped, "\\", "\\\\");
    StringReplace(escaped, "\"", "\\\"");
    StringReplace(escaped, "\r", "\\r");
@@ -1498,7 +1500,8 @@ bool QueryOpenRouterDirect(string prompt, string &responseText)
    uchar result[];
    string responseHeaders = "";
    int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
-   if(bytes > 0 && post[bytes-1] == 0) ArrayResize(post, bytes - 1);
+   while(bytes > 0 && post[bytes-1] == 0) { bytes--; }
+   ArrayResize(post, bytes);
    
    ResetLastError();
    int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
@@ -1529,7 +1532,8 @@ bool QueryGroqDirect(string prompt, string &responseText)
    uchar result[];
    string responseHeaders = "";
    int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
-   if(bytes > 0 && post[bytes-1] == 0) ArrayResize(post, bytes - 1);
+   while(bytes > 0 && post[bytes-1] == 0) { bytes--; }
+   ArrayResize(post, bytes);
    
    ResetLastError();
    int res = WebRequest("POST", url, headers, 8000, post, result, responseHeaders);
