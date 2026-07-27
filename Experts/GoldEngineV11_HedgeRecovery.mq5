@@ -1404,8 +1404,8 @@ bool QueryGeminiDirect(string prompt, string &responseText)
    string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + InpGeminiAPIKey;
    string headers = "Content-Type: application/json\r\n";
    
-   char post[];
-   char result[];
+   uchar post[];
+   uchar result[];
    string responseHeaders = "";
    int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
    if(bytes > 0 && post[bytes-1] == 0) ArrayResize(post, bytes - 1);
@@ -1494,8 +1494,8 @@ bool QueryOpenRouterDirect(string prompt, string &responseText)
    string url = "https://openrouter.ai/api/v1/chat/completions";
    string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpOpenRouterAPIKey + "\r\nHTTP-Referer: http://localhost\r\nX-Title: GoldEngine\r\n";
    
-   char post[];
-   char result[];
+   uchar post[];
+   uchar result[];
    string responseHeaders = "";
    int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
    if(bytes > 0 && post[bytes-1] == 0) ArrayResize(post, bytes - 1);
@@ -1525,8 +1525,8 @@ bool QueryGroqDirect(string prompt, string &responseText)
    string url = "https://api.groq.com/openai/v1/chat/completions";
    string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + InpGroqAPIKey + "\r\n";
    
-   char post[];
-   char result[];
+   uchar post[];
+   uchar result[];
    string responseHeaders = "";
    int bytes = StringToCharArray(requestBody, post, 0, WHOLE_ARRAY, CP_UTF8);
    if(bytes > 0 && post[bytes-1] == 0) ArrayResize(post, bytes - 1);
@@ -2581,8 +2581,8 @@ void FetchEconomicCalendar()
    
    string url = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml";
    string headers = "";
-   char post[];
-   char result[];
+   uchar post[];
+   uchar result[];
    string responseHeaders = "";
    
    ResetLastError();
