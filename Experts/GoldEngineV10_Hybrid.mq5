@@ -3168,7 +3168,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
    GetAccountRiskExposure(floatingPnL, totalRiskUSD);
    string riskExposureDesc = StringFormat("Floating PnL=%.2f$, Active Risk Exposure to SL=%.2f$", floatingPnL, totalRiskUSD);
 
-      string prompt = StringFormat(
+         string prompt = StringFormat(
       "Gold (XAUUSD) setup analysis. Current price=%.2f. Active Session: %s (Time: %s). Account Capital: Balance=%.2f, Equity=%.2f, Free Margin=%.2f, Margin Level=%.1f%%. Open Positions Exposure: %s. "+
       "GNN Line Distances: %s. Technical Signals: Intraday Trend (M5) is %s, Macro H1 Bias: %s (Reason: %s), Macro Trend (H1/H4) is %s, Intraday VWAP is %s, RSI Status: %s, Spread Status: %s. "+
       "Daily Range Analysis: %s. Asian Session Range: %s. Volatility Regime State: %s. Multi-Timeframe Trend %s. Multi-Timeframe Structure Map: %s. Volatility opens: %s. "+
@@ -3197,10 +3197,11 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       "  - Asian Range Sweeps (Judas Swings): A stop hunt sweeps the Asian session High or Low at London/NY open to collect liquidity. Once the sweep is confirmed (price pulls back inside the range with long wicks), price will aggressively expand to mitigate the opposite side's imbalances. "+
       "  - EMA Fountain Alignment: Fanned-out EMAs with steep angles push price rapidly to fill gaps in the trend direction on brief pullbacks. Counter-trend FVGs should not be traded until EMA angles flatten out (exhaustion). "+
       "  - Order Block & FVG Convergence: Retests of an institutional OB that align with the 50% consequent encroachment level of an FVG form premium entry zones to catch the next gap-filling expansion wave. "+
+      "7. EMA OVER-EXTENSION & MEAN REVERSION (THE EMA GRAVITY GAP): Treat the 200 EMA as the market's long-term fair value equilibrium (gravity line). When price moves rapidly in one direction, leaving a series of candles (e.g. red candles below the 200 EMA) completely isolated without touching the line, it creates a 'Gravity Gap' (liquidity vacuum). The further price stretches away from the 200 EMA, the higher the mathematical probability of a sharp pullback (mean reversion) to fill the gap and touch the 200 EMA. Avoid entering trend-continuation trades (e.g. selling when price is already far below the 200 EMA) to prevent selling the bottom or buying the top. Furthermore, if price pulls back close to the 200 EMA but reverses without touching the line, it indicates extreme trend strength where institutional players are front-running the average. "+
       "Instructions: "+
       "0. CHAIN-OF-THOUGHT ANALYSIS: Perform a strict 5-Phase evaluation checklist inside the 'reasoning' key before deciding: "+
       "1. Basics & Market Structure (Phase 1): Map structural direction, identify BOS/CHOCH, locate premium/discount range, scan volume & liquidity pools. "+
-      "2. Intermediate Confluences (Phase 2): Check EMA Fountain alignment, EMA Angles/slopes, VWAP deviation, RSI momentum, ATR volatility sizing, and Fibonacci retracement confluence. "+
+      "2. Intermediate Confluences (Phase 2): Check EMA Fountain alignment, EMA Angles/slopes, VWAP deviation, RSI momentum, ATR volatility sizing, and the EMA Gravity Gap (assess if price is over-extended from the 200 EMA and look for mean-reversion pullbacks). "+
       "3. Advanced Price Action & Institutional Flow (Phase 3): Scan for unmitigated FVGs and OBs, identify breaker/mitigation blocks, rejection blocks, and check for liquidity sweeps/stop hunts. Analyze when and why the price will move to fill gaps using GNN line rejections, Asian range sweeps, and EMA fountain momentum alignment. "+
       "4. Strategy Alignment (Phase 4): Choose entry strategy (Scalping, Intraday, Swing, Pullback, Breakout, Reversion, or OB/FVG/SMT), run pre-trade checklist. "+
       "5. Professional Risk & Position Management (Phase 5): Audit target stop loss (placed at least 3-5 USD beyond GNN/structure boundary or OB/FVG edge) and take profit targets. Perform position sizing and leverage audits. "+
@@ -3208,7 +3209,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       "1. INSTITUTIONAL MARKET STRUCTURE: Read the structural phase. Identify the dominant Order Flow. Identify key BOS and CHOCH. Trade in the direction of the dominant institutional flow. Never write generic or placeholders for HOLD decisions; provide clear technical confluences. "+
       "2. CONFLUENCE ENTRY ZONES: Seek convergence. Look for zones where GNN boundaries overlap with local Order Blocks (OB), Breaker Blocks, or Fair Value Gaps (FVG) to form high-conviction entries. "+
       "3. DECISIVE ENTRY & MOMENTUM: Execute immediately when a setup is validated. Do not over-analyze or hesitate. Place the trade and let your Stop Loss protect your capital. "+
-      "4. STRATEGIC STOP LOSS PLACEMENT: Never place a Stop Loss right on a GNN line or key indicator value. Always place it 3 to 5 USD beyond the structural boundary (below the support floor or above the resistance ceiling) to survive normal market noise. "+
+      "4. STRATEGIC STOP LOSS PLACEMENT: Never place a Stop Loss right on GNN line or key indicator value. Always place it 3 to 5 USD beyond the structural boundary (below the support floor or above the resistance ceiling) to survive normal market noise. "+
       "5. SIDEWAYS PING-PONG PLAY: When you detect a tight sideways range, execute a SCALPING strategy. Buy ONLY at the lower GNN boundary (discount zone), target the upper boundary, and sell ONLY at the upper GNN boundary (premium zone), targeting the lower boundary. "+
       "6. OBJECTIVE EXECUTION: Focus entirely on the technical setup at hand. Do not let recent closed losses or wins affect your decision-making. "+
       "7. LONG-TERM SWING TRADES: When the daily/higher timeframe shows a clear macro trend, look for pullback entries to ride the trend. Set a 'LONG_TERM' horizon, target major support/resistance targets far away, and use a wider Stop Loss to allow the swing trade room to breathe. "+
