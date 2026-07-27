@@ -1918,7 +1918,7 @@ void GetAccountRiskExposure(double &floatingPnL, double &totalRiskUSD)
    {
       if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
       {
-         double profit = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_COMMISSION) + PositionGetDouble(POSITION_SWAP);
+         double profit = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
          floatingPnL += profit;
          
          double sl = PositionGetDouble(POSITION_SL);
