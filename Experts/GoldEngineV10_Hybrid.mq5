@@ -1808,6 +1808,71 @@ void SaveReasoningForNewPosition(string responseText)
    }
 }
 
+string GetMTFStructureAlignment()
+{
+   double m5Close = iClose(_Symbol, PERIOD_M5, 0);
+   double m5EMA50 = 0.0;
+   int hM5_50 = iMA(_Symbol, PERIOD_M5, 50, 0, MODE_EMA, PRICE_CLOSE);
+   if(hM5_50 != INVALID_HANDLE)
+   {
+      double arr[];
+      if(CopyBuffer(hM5_50, 0, 0, 1, arr) > 0) m5EMA50 = arr[0];
+      IndicatorRelease(hM5_50);
+   }
+   double m5EMA200 = 0.0;
+   int hM5_200 = iMA(_Symbol, PERIOD_M5, 200, 0, MODE_EMA, PRICE_CLOSE);
+   if(hM5_200 != INVALID_HANDLE)
+   {
+      double arr[];
+      if(CopyBuffer(hM5_200, 0, 0, 1, arr) > 0) m5EMA200 = arr[0];
+      IndicatorRelease(hM5_200);
+   }
+   string m5Structure = (m5Close > m5EMA50 && m5EMA50 > m5EMA200) ? "BULLISH" :
+                        (m5Close < m5EMA50 && m5EMA50 < m5EMA200) ? "BEARISH" : "NEUTRAL";
+
+   double m15Close = iClose(_Symbol, PERIOD_M15, 0);
+   double m15EMA50 = 0.0;
+   int hM15_50 = iMA(_Symbol, PERIOD_M15, 50, 0, MODE_EMA, PRICE_CLOSE);
+   if(hM15_50 != INVALID_HANDLE)
+   {
+      double arr[];
+      if(CopyBuffer(hM15_50, 0, 0, 1, arr) > 0) m15EMA50 = arr[0];
+      IndicatorRelease(hM15_50);
+   }
+   double m15EMA200 = 0.0;
+   int hM15_200 = iMA(_Symbol, PERIOD_M15, 200, 0, MODE_EMA, PRICE_CLOSE);
+   if(hM15_200 != INVALID_HANDLE)
+   {
+      double arr[];
+      if(CopyBuffer(hM15_200, 0, 0, 1, arr) > 0) m15EMA200 = arr[0];
+      IndicatorRelease(hM15_200);
+   }
+   string m15Structure = (m15Close > m15EMA50 && m15EMA50 > m15EMA200) ? "BULLISH" :
+                         (m15Close < m15EMA50 && m15EMA50 < m15EMA200) ? "BEARISH" : "NEUTRAL";
+
+   double h1Close = iClose(_Symbol, PERIOD_H1, 0);
+   double h1EMA50 = 0.0;
+   int hH1_50 = iMA(_Symbol, PERIOD_H1, 50, 0, MODE_EMA, PRICE_CLOSE);
+   if(hH1_50 != INVALID_HANDLE)
+   {
+      double arr[];
+      if(CopyBuffer(hH1_50, 0, 0, 1, arr) > 0) h1EMA50 = arr[0];
+      IndicatorRelease(hH1_50);
+   }
+   double h1EMA200 = 0.0;
+   int hH1_200 = iMA(_Symbol, PERIOD_H1, 200, 0, MODE_EMA, PRICE_CLOSE);
+   if(hH1_200 != INVALID_HANDLE)
+   {
+      double arr[];
+      if(CopyBuffer(hH1_200, 0, 0, 1, arr) > 0) h1EMA200 = arr[0];
+      IndicatorRelease(hH1_200);
+   }
+   string h1Structure = (h1Close > h1EMA50 && h1EMA50 > h1EMA200) ? "BULLISH" :
+                        (h1Close < h1EMA50 && h1EMA50 < h1EMA200) ? "BEARISH" : "NEUTRAL";
+
+   return StringFormat("[M5: %s, M15: %s, H1: %s]", m5Structure, m15Structure, h1Structure);
+}
+
 bool CallAI(string prompt, string &responseText)
 {
    // --- Option 1: Groq Only ---
@@ -2217,7 +2282,62 @@ void GetRecentTradesHistory(string &historyStr)
    
    int totalDeals = HistoryDealsTotal();
    int count = 0;
+   int wins = 0;
+   int losses = 0;
+   double totalWinAmt = 0.0;
+   double totalLossAmt = 0.0;
+   int consecutiveWins = 0;
+   int consecutiveLosses = 0;
+   bool streakActive = true;
    
+   for(int i = totalDeals - 1; i >= 0 && count < 5; i--)
+   {
+      ulong ticket = HistoryDealGetTicket(i);
+      if(ticket > 0)
+      {
+         string symbol = HistoryDealGetString(ticket, DEAL_SYMBOL);
+         long magic = HistoryDealGetInteger(ticket, DEAL_MAGIC);
+         long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+         
+         if(symbol == _Symbol && magic == InpMagicNumber && (entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY))
+         {
+            double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT) + HistoryDealGetDouble(ticket, DEAL_COMMISSION) + HistoryDealGetDouble(ticket, DEAL_SWAP);
+            if(profit > 0.0)
+            {
+               wins++;
+               totalWinAmt += profit;
+               if(streakActive)
+               {
+                  if(consecutiveLosses > 0) streakActive = false;
+                  else consecutiveWins++;
+               }
+            }
+            else if(profit < 0.0)
+            {
+               losses++;
+               totalLossAmt += profit;
+               if(streakActive)
+               {
+                  if(consecutiveWins > 0) streakActive = false;
+                  else consecutiveLosses++;
+               }
+            }
+            count++;
+         }
+      }
+   }
+   
+   double winRate = (count > 0) ? ((double)wins / (double)count * 100.0) : 0.0;
+   double avgWin = (wins > 0) ? (totalWinAmt / wins) : 0.0;
+   double avgLoss = (losses > 0) ? (totalLossAmt / losses) : 0.0;
+   string streakStr = "None";
+   if(consecutiveWins > 0) streakStr = StringFormat("%d Wins", consecutiveWins);
+   else if(consecutiveLosses > 0) streakStr = StringFormat("%d Losses", consecutiveLosses);
+   
+   historyStr += StringFormat("[Performance Stats (Last 5 Trades): Win Rate=%.1f%%, Avg Win=%.2f$, Avg Loss=%.2f$, Current Streak=%s] ", 
+      winRate, avgWin, avgLoss, streakStr);
+      
+   count = 0;
    for(int i = totalDeals - 1; i >= 0 && count < 3; i--)
    {
       ulong ticket = HistoryDealGetTicket(i);
@@ -2946,11 +3066,32 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
    double g_dailyImbalance = 1.0;
    CalculateDailyVolumeProfile(g_dailyPOC, g_dailyVAH, g_dailyVAL, g_dailyImbalance);
    string newsCountdownDesc = GetNewsCountdownDesc();
+   
+   string mtfStructureMap = GetMTFStructureAlignment();
+   
+   string volRegimeDesc = "Normal Volatility";
+   double currentATRVal = currentATR;
+   double atrSMA = 0.0;
+   double atrArr[];
+   int copiedAtr = CopyBuffer(g_atrHandle, 0, 1, 100, atrArr);
+   if(copiedAtr > 0)
+   {
+      double sum = 0.0;
+      for(int k = 0; k < copiedAtr; k++) sum += atrArr[k];
+      atrSMA = sum / copiedAtr;
+   }
+   if(atrSMA > 0.0)
+   {
+      double ratio = currentATRVal / atrSMA;
+      if(ratio < 0.8) volRegimeDesc = StringFormat("Volatility Compression (Ratio=%.2f, ATR=%.2f, SMA=%.2f) - range scalping preferred", ratio, currentATRVal, atrSMA);
+      else if(ratio > 1.5) volRegimeDesc = StringFormat("Volatility Expansion (Ratio=%.2f, ATR=%.2f, SMA=%.2f) - high momentum breakouts expected", ratio, currentATRVal, atrSMA);
+      else volRegimeDesc = StringFormat("Normal Volatility (Ratio=%.2f, ATR=%.2f, SMA=%.2f)", ratio, currentATRVal, atrSMA);
+   }
 
-      string prompt = StringFormat(
+   string prompt = StringFormat(
       "Gold (XAUUSD) setup analysis. Current price=%.2f. Active Session: %s. Account Capital: Balance=%.2f, Equity=%.2f, Free Margin=%.2f, Margin Level=%.1f%%. "+
       "GNN Line Distances: %s. Technical Signals: Intraday Trend (M5) is %s, Macro H1 Bias: %s (Reason: %s), Macro Trend (H1/H4) is %s, Intraday VWAP is %s, RSI Status: %s, Spread Status: %s. "+
-      "Daily Range Analysis: %s. Multi-Timeframe Trend %s. Volatility opens: %s. "+
+      "Daily Range Analysis: %s. Volatility Regime State: %s. Multi-Timeframe Trend %s. Multi-Timeframe Structure Map: %s. Volatility opens: %s. "+
       "Momentum & Proximity Metrics: %s. Intraday Volume Profile: POC=%.2f, VAH=%.2f, VAL=%.2f, Imbalance Ratio=%.2f. High-Impact News Countdowns: %s. "+
       "Trend Direction: %s. Indicators: ADX=%.2f, ATR=%.2f, RSI=%.2f, EMA50=%.2f, EMA200=%.2f, EMA9=%.2f, VWAP=%.2f, VolSMA10=%.1f, VolSMA20=%.1f, Spread=%.2f. "+
       "Upcoming High-Impact News today: %s. "+
@@ -2991,7 +3132,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       "'stop_loss_price' (double target stop loss price level, or 0.0 to use default), "+
       "'take_profit_price' (double target take profit price level, or 0.0 to use default), "+
       "'reason' (short 10 words summary).",
-      prevClose, activeSession, balance, equity, freeMargin, marginLevel, gnnDistanceDesc, maSignal, g_h1MacroBias, g_h1MacroReason, macroTrendDesc, vwapSignal, rsiSignal, spreadSignal, dailyRangeDesc, mtfConfluenceDesc, sessionCountdownDesc,
+      prevClose, activeSession, balance, equity, freeMargin, marginLevel, gnnDistanceDesc, maSignal, g_h1MacroBias, g_h1MacroReason, macroTrendDesc, vwapSignal, rsiSignal, spreadSignal, dailyRangeDesc, volRegimeDesc, mtfConfluenceDesc, mtfStructureMap, sessionCountdownDesc,
       metricsDesc, g_dailyPOC, g_dailyVAH, g_dailyVAL, g_dailyImbalance, newsCountdownDesc,
       trendDesc, currentADX, currentATR, currentRSI, currentEMA, currentEMA200, currentEMA9, currentVWAP, volSMA10, volSMA20, spread, g_upcomingNews, barsHistory, macroHistory, candlePatterns, tradeHistory, magnetDesc, ictDesc
    );
