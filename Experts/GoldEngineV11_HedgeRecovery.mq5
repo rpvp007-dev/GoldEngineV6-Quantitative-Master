@@ -4213,6 +4213,8 @@ void TestAIEngines()
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   Print("[GoldEngine] INITIALIZED: Supreme AI Version with EscapeJSONString & uchar buffers.");
+
    g_openRouterAPIKey = InpOpenRouterAPIKey;
    g_groqAPIKey = InpGroqAPIKey;
    
