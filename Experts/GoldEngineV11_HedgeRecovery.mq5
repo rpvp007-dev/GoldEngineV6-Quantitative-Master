@@ -3205,7 +3205,7 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
    GetAccountRiskExposure(floatingPnL, totalRiskUSD);
    string riskExposureDesc = StringFormat("Floating PnL=%.2f$, Active Risk Exposure to SL=%.2f$", floatingPnL, totalRiskUSD);
 
-   string prompt = StringFormat(
+      string prompt = StringFormat(
       "Gold (XAUUSD) setup analysis. Current price=%.2f. Active Session: %s (Time: %s). Account Capital: Balance=%.2f, Equity=%.2f, Free Margin=%.2f, Margin Level=%.1f%%. Open Positions Exposure: %s. "+
       "GNN Line Distances: %s. Technical Signals: Intraday Trend (M5) is %s, Macro H1 Bias: %s (Reason: %s), Macro Trend (H1/H4) is %s, Intraday VWAP is %s, RSI Status: %s, Spread Status: %s. "+
       "Daily Range Analysis: %s. Asian Session Range: %s. Volatility Regime State: %s. Multi-Timeframe Trend %s. Multi-Timeframe Structure Map: %s. Volatility opens: %s. "+
@@ -3229,11 +3229,16 @@ bool ExecuteNewOrderPlacement(datetime currentBarTime, bool isMidCandle = false)
       "3. FAIR VALUE GAPS (FVG) & IMBALANCE: FVGs represent market structural inefficiencies where price moved so rapidly that buy/sell orders were left unfilled. Price acts like a magnet, eventually pulling back to rebalance these gaps. Analyze the nearest unmitigated FVGs. A retracement to the 50% level (Consequent Encroachment) of an FVG in a discount zone is a prime, high-probability long entry zone; a return to a premium FVG is a prime short entry zone. "+
       "4. ORDER BLOCKS (OB) SUPPLY/DEMAND WALLS: Order Blocks represent price zones where central banks and institutional players built massive positions before launching a structural expansion. Locate the nearest unmitigated OBs. The open price of a bullish OB acts as a strong institutional support floor; the open of a bearish OB acts as a strong supply ceiling. Place limit entries at these levels, placing stop losses strictly 3 to 5 USD beyond the outer boundary of the Order Block. "+
       "5. SYSTEMATIC DATA ANALYSIS: Synthesize all data points systematically. Do not rely on a single indicator. Look for a convergence of: EMA Fountain/Angles (momentum direction) + FVG mitigation (inefficiency fill) + OB retests (institutional wall) + Volume Profile (POC/VAH/VAL coordinates) + Wick Rejections (liquidity sweep confirmations). "+
+      "6. INSTITUTIONAL GAP-FILLING & REBALANCING MECHANICS (WHEN & WHY PRICES MOVE): Understand that prices are driven by two institutional mandates: (a) Sweeping liquidity pools (GNN Golden Ceiling/Aqua Floor boundaries, Asian range highs/lows, equal highs/lows, or swing pivots) and (b) Rebalancing market inefficiencies (unfilled Fair Value Gaps and volume imbalances). Reversals to fill gaps are triggered when: "+
+      "  - GNN Boundary Wick Rejections: Price tests a GNN Golden Ceiling or Aqua Floor and leaves long wicks (wick rejection). This rejection launchpad drives the price back through the range to fill the nearest unmitigated FVG in the opposite direction. "+
+      "  - Asian Range Sweeps (Judas Swings): A stop hunt sweeps the Asian session High or Low at London/NY open to collect liquidity. Once the sweep is confirmed (price pulls back inside the range with long wicks), price will aggressively expand to mitigate the opposite side's imbalances. "+
+      "  - EMA Fountain Alignment: Fanned-out EMAs with steep angles push price rapidly to fill gaps in the trend direction on brief pullbacks. Counter-trend FVGs should not be traded until EMA angles flatten out (exhaustion). "+
+      "  - Order Block & FVG Convergence: Retests of an institutional OB that align with the 50% consequent encroachment level of an FVG form premium entry zones to catch the next gap-filling expansion wave. "+
       "Instructions: "+
       "0. CHAIN-OF-THOUGHT ANALYSIS: Perform a strict 5-Phase evaluation checklist inside the 'reasoning' key before deciding: "+
       "1. Basics & Market Structure (Phase 1): Map structural direction, identify BOS/CHOCH, locate premium/discount range, scan volume & liquidity pools. "+
       "2. Intermediate Confluences (Phase 2): Check EMA Fountain alignment, EMA Angles/slopes, VWAP deviation, RSI momentum, ATR volatility sizing, and Fibonacci retracement confluence. "+
-      "3. Advanced Price Action & Institutional Flow (Phase 3): Scan for unmitigated FVGs and OBs, identify breaker/mitigation blocks, rejection blocks, and check for liquidity sweeps/stop hunts. Combine H1 bias with Daily/Weekly bias alignment. "+
+      "3. Advanced Price Action & Institutional Flow (Phase 3): Scan for unmitigated FVGs and OBs, identify breaker/mitigation blocks, rejection blocks, and check for liquidity sweeps/stop hunts. Analyze when and why the price will move to fill gaps using GNN line rejections, Asian range sweeps, and EMA fountain momentum alignment. "+
       "4. Strategy Alignment (Phase 4): Choose entry strategy (Scalping, Intraday, Swing, Pullback, Breakout, Reversion, or OB/FVG/SMT), run pre-trade checklist. "+
       "5. Professional Risk & Position Management (Phase 5): Audit target stop loss (placed at least 3-5 USD beyond GNN/structure boundary or OB/FVG edge) and take profit targets. Perform position sizing and leverage audits. "+
       "Write your detailed reasoning step-by-step first. "+
