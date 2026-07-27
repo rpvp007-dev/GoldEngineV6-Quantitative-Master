@@ -143,7 +143,7 @@ input string   InpOpenRouterModel    = "google/gemma-4-31b-it"; // OpenRouter Mo
 input bool     InpUseAIEngines       = true;    // Enable AI Brain Integration
 input bool     InpUseAIVision        = false;   // Enable AI Multimodal Vision (Requires OpenRouter Vision Model)
 
-input ENUM_AI_ENGINE InpAIEngineSelection = AI_GROQ; // AI Engine Selection
+input ENUM_AI_ENGINE InpAIEngineSelection = AI_BOTH_FAILOVER; // AI Engine Selection
 input int      InpMinConviction      = 1;      // Minimum AI Conviction to trade (0-100)
 
 enum ENUM_DB_POSITION
@@ -327,6 +327,8 @@ string         g_h1MacroBias = "NEUTRAL";
 string         g_h1MacroReason = "Analyzing macro H1...";
 datetime       g_lastH1BarTime = 0;
 string         g_lastAIResponseText = "";
+string         g_openRouterAPIKey = "";
+string         g_groqAPIKey = "";
 datetime       g_lastCalendarFetchTime = 0; // Tracks when we last fetched calendar
 
 //+------------------------------------------------------------------+
@@ -1392,7 +1394,7 @@ bool QueryGeminiDirect(string prompt, string &responseText)
 
 bool QueryOpenRouterDirect(string prompt, string &responseText)
 {
-   if(InpOpenRouterAPIKey == "" || InpOpenRouterAPIKey == "PASTE_YOUR_API_KEY_HERE") return false;
+   if(g_openRouterAPIKey == "" || g_openRouterAPIKey == "PASTE_YOUR_API_KEY_HERE") return false;
    
    string cleanPrompt = prompt;
    StringReplace(cleanPrompt, "\"", "\\\"");
@@ -1474,7 +1476,7 @@ bool QueryOpenRouterDirect(string prompt, string &responseText)
 
 bool QueryGroqDirect(string prompt, string &responseText)
 {
-   if(InpGroqAPIKey == "" || InpGroqAPIKey == "PASTE_YOUR_API_KEY_HERE") return false;
+   if(g_groqAPIKey == "" || g_groqAPIKey == "PASTE_YOUR_API_KEY_HERE") return false;
    
    string cleanPrompt = prompt;
    StringReplace(cleanPrompt, "\"", "\\\"");
@@ -4166,6 +4168,29 @@ void TestAIEngines()
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   g_openRouterAPIKey = InpOpenRouterAPIKey;
+   g_groqAPIKey = InpGroqAPIKey;
+   
+   if(g_openRouterAPIKey == "" || g_groqAPIKey == "")
+   {
+      int fileHandle = FileOpen("GoldEngine_API_Keys.txt", FILE_READ|FILE_TXT|FILE_ANSI);
+      if(fileHandle != INVALID_HANDLE)
+      {
+         string fileContent = FileReadString(fileHandle);
+         FileClose(fileHandle);
+         
+         int pipeIdx = StringFind(fileContent, "|");
+         if(pipeIdx >= 0)
+         {
+            if(g_openRouterAPIKey == "") g_openRouterAPIKey = StringSubstr(fileContent, 0, pipeIdx);
+            if(g_groqAPIKey == "") g_groqAPIKey = StringSubstr(fileContent, pipeIdx + 1);
+            StringTrimLeft(g_openRouterAPIKey); StringTrimRight(g_openRouterAPIKey);
+            StringTrimLeft(g_groqAPIKey); StringTrimRight(g_groqAPIKey);
+         }
+      }
+   }
+   
+
    trade.SetExpertMagicNumber(InpMagicNumber);
    g_lastBarTime = 0;
    g_lastOrderPlacedBarTime = 0;
